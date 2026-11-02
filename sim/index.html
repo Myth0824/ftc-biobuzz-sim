@@ -268,6 +268,7 @@
       <b>V</b><span>Open the review</span>
       <b>C</b><span>Change the camera</span>
       <b>Esc</b><span>Close any popup</span>
+      <b>Rebind</b><span>Click <b>Configure Key Bindings</b> at the bottom of this help, then a row, then press a key</span>
     </div>
 
     <h2>While paused</h2>
@@ -300,10 +301,16 @@
   <div class="keys grid">
     <b>Periods</b><span>Full 2:30 · TELEOP only 2:00 · AUTO only 0:30 · Practice (unlimited)</span>
     <b>Opponents</b><span>0 (solo) · 1 (red partner) · 2 (+one blue) · 3 (full field)</span>
+    <b>Stage</b><span>Qualification, with ranking points, or Playoff, without them</span>
+    <b>Camera</b><span>Driver station · Overhead · Chase · Audience — or press C to cycle through them</span>
+    <b>Units</b><span>Metric or US, for every size, speed, and coordinate that the page shows</span>
+    <b>Sound</b><span>On/Off — the match's sounds, such as the countdown</span>
     <b>Shot trajectory</b><span>On/Off — shows the dotted arc predicting where your next shot lands</span>
     <b>AUTO paths</b><span>On/Off — shows the AI's planned path on the field</span>
     <b>Referee</b><span>Enables/disables the PIN foul (G421) rule</span>
     <b>Tree view</b><span>Shows the AI behaviour tree running live</span>
+    <b>Export match</b><span>After a match, downloads the trace as JSON and the notes as Markdown</span>
+    <b>Copy notes path</b><span>Copies the path of the annotation file in the repository</span>
   </div>
 
   <h2>Robot config (gear ⚙ icon)</h2>
@@ -327,22 +334,29 @@
   <h2>Scoreboard</h2>
   <div class="keys"><b style="color:var(--ok)">H</b> = human-driven (team 32294). <b style="color:var(--dim)">B</b> = AI robot (bot). The gear icon ⚙ opens that robot's config. During a match the gear icons are hidden — pause first to access them.</div>
 
+  <h2>Status bar</h2>
+  <div class="keys">The bar at the bottom of the screen shows the controller's name and whether it is connected, and which robot the keyboard drives. A blue dot means keys are held right now. It tucks itself above the AUTO editor's bar while you edit a plan.</div>
+
   <h2>Timeline and review</h2>
   <div class="keys">The scrubber bar shows the full match. Gray ticks = MATCH start, TELEOP start, FLOWERS open (1:00), endgame (0:20), and MATCH end. Colored dots = notes. Drag the thumb back during a live match to review — the match waits. Press V or click the Review button to enter full review mode with free-look camera. Press Go Live or R to return.</div>
 
-  <h2>AUTO path editor</h2>
-  <div class="keys">Your robot runs an AI plan during the 30 s AUTO. To edit it: open <b>Game Setup → Edit AUTO paths</b>, or click the gear ⚙ on 32294 and choose a plan, then click <b>Edit AUTO paths</b>.</div>
+  <h2 id="help-autoedit">AUTO path editor</h2>
+  <div class="keys">Your robot runs an AI plan during the 30 s AUTO. To edit it: open <b>Game Setup → Edit AUTO paths</b>, or click the gear ⚙ on 32294, choose a plan, and click <b>Edit AUTO paths</b>. The <b style="font-weight:700">?</b> button in the editor bar opens this help without leaving the editor.</div>
   <div class="keys grid" style="margin-top:6px">
     <b>Orange dots</b><span>Each dot is a pose (position + heading). Drag to move it.</span>
     <b>Arrow on dot</b><span>The robot's heading at that position. Drag the tip to rotate.</span>
-    <b>Create new</b><span>Makes a new plan as a copy of any existing one</span>
+    <b>Click a dot</b><span>Opens <b>Step settings</b> for that drive step: the intake, the turret, and a shoot.</span>
+    <b>Step settings</b><span>Tick <b>Intake</b> to run it during the drive, with a filter (POLLEN, own NECTAR, or all). Tick <b>Turret</b> to aim it to an angle while driving. Tick <b>Shoot</b> to fire a number of balls right after the step, with a timeout. Adding one to a bare drive step wraps the step in a parallel, and removing them unwraps it again.</span>
+    <b>Steps panel</b><span>The list at the right while you edit: click a step to select it, ↑ and ↓ to reorder it, and ✕ to remove it. A shoot that a step added travels with it.</span>
+    <b>Reference points</b><span>Named positions that steps can follow. Right-click one for <b>Go to reference point</b>, which adds a drive step to it. Add one with <b>Add reference point here</b>, and delete it from the same menu.</span>
+    <b>Create new</b><span>Makes a new plan: a copy of any existing one, or blank (Start from scratch) for the robot's start position.</span>
     <b>Edit button</b><span>Unlocks dragging for your plan (system plans are read-only)</span>
     <b>Undo / Redo</b><span>Cmd+Z / Shift+Cmd+Z</span>
     <b>Reset this step</b><span>Puts a step back to its original position</span>
     <b>Delete plan</b><span>Removes your custom plan</span>
-    <b>Snap</b><span>Snaps drags to a 1-inch grid. Hold Alt to bypass.</span>
+    <b>Snap</b><span>Snaps drags to a 1-inch grid and turns to 5°. Hold Alt, or Option on a Mac, to do the opposite.</span>
   </div>
-  <p style="color:var(--dim);font-size:11px;margin:6px 0 0">To add more positions, change intake/turret behaviour, or write a completely custom path, edit the JSON file directly at <b>biobuzz-sim/src/auto/trees/auto/32294-custom.json</b>. See below for the full reference.</p>
+  <p style="color:var(--dim);font-size:11px;margin:6px 0 0">The editor covers most plans. For full control — waypoints, waits, conditions, and the camera's sightings — see the JSON reference below.</p>
 
   <h2>AUTO path JSON reference</h2>
   <div class="keys">A path is a JSON file with four sections: <b>defs</b> (named positions), <b>root</b> (the steps), and a few header fields. All positions use red-alliance coordinates: x = red wall (−) to blue wall (+), y = audience (−) to rear (+), headingDeg = degrees CCW from +x axis.</div>

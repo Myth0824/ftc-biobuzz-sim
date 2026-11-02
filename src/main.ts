@@ -662,8 +662,8 @@ function paintStepSettings() {
 
 // ---------- field editor ----------
 $('aedone').onclick = () => { closeNewPlan(); editor.close(); }; $('aeundo').onclick = () => editor.undo(); $('aeredo').onclick = () => editor.redo();
-$('aehelp').onclick = () => { editor.close(); toggleModal('helpbox'); // scroll to the AUTO section
-  setTimeout(() => { const el = $('helpbox').querySelector('h2:last-of-type'); if (el) el.scrollIntoView({ behavior: 'smooth' }); }, 80); };
+$('aehelp').onclick = () => { toggleModal('helpbox'); // The editor stays open behind the help. Scroll to the AUTO editor's section.
+  setTimeout(() => { const el = $('helpbox').querySelector('#help-autoedit'); if (el) el.scrollIntoView({ behavior: 'smooth' }); }, 80); };
 // The snap checkbox is a convenience that this browser keeps. The reference point under the pointer shows its name.
 const snapBox = $<HTMLInputElement>('aesnap');
 try { snapBox.checked = localStorage.getItem('biobuzz.snap') === 'on'; } catch { /* Storage is a convenience. */ }
