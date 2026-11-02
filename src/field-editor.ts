@@ -6,7 +6,7 @@
  * browser keeps your plans (`user-trees.ts`). See `auto/auto-edit.ts` for how a drag changes a tree.
  */
 import { exprContext, type ExprContext, type TreeDef } from './bt';
-import { addReference, defUsers, deleteDef, changedDefs, changedSteps, clonePlan, editHandles, isEdited, makeAbsolute, moveHandle, moveReference, planId, poseText, referencePoints, referTo, resetHandle, sharedWith, sourceOf, stepReference, toAlliance, turnHandle, turnReference, type Handle, type RefPoint } from './auto/auto-edit';
+import { addReference, defUsers, deleteDef, changedDefs, changedSteps, clonePlan, editHandles, isEdited, makeAbsolute, moveHandle, moveReference, planId, poseText, referencePoints, referTo, resetHandle, sharedWith, sourceOf, stepReference, toAlliance, turnHandle, turnReference, rootSequence, addDriveToStep, removeStep, moveStep, type Handle, type RefPoint } from './auto/auto-edit';
 import { AUTO_FIELD, AUTO_PROBLEMS, AUTO_REGISTRY, AUTO_SOURCES, AUTO_TREES, BUILT_IN_AUTO, SOLO_AUTO, addAutoTree, autoFor, autoStart, defValues } from './auto/onboard';
 import { addDef, defRows, paramFields, readField, setDef, setParam, sortProblems, type DefRow, type ParamField, type Problems } from './auto/draft';
 import type { View, CameraMode } from './render/view';
@@ -260,6 +260,67 @@ export class FieldEditor {
   }
 
   /**
+   * Creates a brand-new empty plan with `name` and `description`, for the robot's start position (blank template).
+   * Returns a problem to show, or null.
+   */
+  createBlank(name: string, description: string): string | null {
+    const n = name.trim(), d = description.trim();
+    if (!n) return 'Give the plan a name.'; if (n.length > 80) return 'A name can have at most 80 characters.';
+    if (!d) return 'Say what the plan does, in a sentence or two.';
+    if (Object.values(AUTO_TREES).some(t => t.name.toLowerCase() === n.toLowerCase())) return `A plan is already named "${n}".`;
+    const side = this.robot >= 0 ? startSide(this.robot) : 'right';
+    const blankId = side === 'left' ? 'blank-left' : 'blank-right';
+    const src = AUTO_SOURCES[blankId] as Json | undefined;
+    if (!src) return 'Blank template not found.';
+    const tree = clonePlan(src, { id: planId(n, id => id in AUTO_TREES), name: n, description: d });
+    addAutoTree(tree, true); saveUserTree(tree);
+    this.host.setAuto(this.robot, String(tree.id));
+    this.showRobot(this.robot); this.edit();
+    return null;
+  }
+
+  /**
+   * Adds a `drive.driveTo` step to the root sequence that drives to the reference point named `refName`.
+   * Returns a problem to show, or null.
+   */
+  addDriveToRef(refName: string): string | null {
+    if (!this.editing) return 'Edit a plan that you made to add steps.';
+    const ref = this.refs.find(r => r.name === refName); if (!ref) return `No reference point named ${refName}.`;
+    const r = addDriveToStep(this.tree, refName, ref.pose);
+    if ('error' in r) return r.error;
+    try { this.remember(this.tree); this.apply(r.tree, true); } catch (e) { this.past.pop(); return e instanceof Error ? e.message.replace(/^.*?: /, '') : String(e); }
+    // Select the newly added step
+    const seq = rootSequence(r.tree); if (seq?.length) { const last = seq[seq.length - 1] as Json; if (typeof last.id === 'string') this.select(`root/${last.id}`); }
+    return null;
+  }
+
+  /** Removes the step at root-sequence `index`. Returns a problem or null. */
+  removeStepAt(index: number): string | null {
+    if (!this.editing) return 'Edit a plan that you made to remove steps.';
+    const r = removeStep(this.tree, index);
+    if ('error' in r) return r.error;
+    this.remember(this.tree); this.selected = null; this.point = -1; this.apply(r.tree, true); return null;
+  }
+
+  /** Moves the step at root-sequence `index` up (-1) or down (+1). Returns a problem or null. */
+  moveStepAt(index: number, dir: -1 | 1): string | null {
+    if (!this.editing) return 'Edit a plan that you made to reorder steps.';
+    const r = moveStep(this.tree, index, dir);
+    if ('error' in r) return r.error;
+    this.remember(this.tree); this.apply(r.tree, true); return null;
+  }
+
+  /** Gets the root-sequence step list for the step-order panel: each step's id, label/ref, and index. */
+  rootSteps(): { index: number; id: string; label: string; path: string }[] {
+    const seq = rootSequence(this.tree); if (!seq) return [];
+    return seq.map((s, i) => {
+      const id = typeof s.id === 'string' ? s.id : String(i);
+      const ref = typeof s.ref === 'string' ? s.ref : (typeof (s as Json).parallel !== 'undefined' ? '{ parallel }' : typeof (s as Json).sequence !== 'undefined' ? '{ sequence }' : '?');
+      return { index: i, id, label: ref, path: `root/${id}` };
+    });
+  }
+
+  /**
    * Deletes the plan shown, which must be one that you created. Every robot that ran it goes back to the plan that it
    * was copied from, or to **Default** when that's the robot's default.
    */
@@ -366,6 +427,18 @@ export class FieldEditor {
     const next = setParam(this.tree, path, key, readField(f, text)); if (next === this.tree) return;
     this.remember(this.tree); this.apply(next, true);
   }
+
+  /**
+   * Applies a new tree JSON directly. Used by the step-settings panel to add/remove/modify
+   * sibling nodes (intake, turret, shoot) alongside a drive.driveTo step.
+   */
+  applyTree(next: Record<string, unknown>) {
+    if (!this.editing) return;
+    this.remember(this.tree); this.apply(next as Json, true);
+  }
+
+  /** Returns a deep clone of the current tree JSON, for reading and mutating before calling applyTree(). */
+  cloneTree(): Record<string, unknown> { return structuredClone(this.tree) as Record<string, unknown>; }
 
   /**
    * Gets the plan's definitions, each with its value before the match for the robot shown, as text. The list is kept

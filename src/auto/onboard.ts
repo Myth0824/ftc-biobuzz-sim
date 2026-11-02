@@ -24,6 +24,9 @@ import laneSweepLeft from './trees/auto/lane-sweep-pair-left.json';
 import soloSweep from './trees/auto/solo-two-tip-sweep.json';
 import soloSweepNoPark from './trees/auto/solo-two-tip-sweep-no-park.json';
 import leaveAndPark from './trees/auto/leave-and-park.json';
+import custom32294 from './trees/auto/32294-custom.json';
+import blankRight from './trees/auto/blank-right.json';
+import blankLeft from './trees/auto/blank-left.json';
 import { fieldObstacles, planPath, type Capsule, type Pt } from './planner';
 
 /** Red's own FLOWER, which gives the FLOWER offsets of the `field` constants. */
@@ -69,6 +72,8 @@ export const ONBOARD_SCHEMA = t.object({
     transfer: t.object({ count: t.number(), capacity: t.number(), full: t.boolean() }),
     /** The shooter. `aimed` is false while a turret still turns toward the raised CELL; a fixed shooter is always aimed. */
     shooter: t.object({ facing: t.enum('front', 'rear'), type: t.enum('catapult', 'fifo', 'dual'), aimed: t.boolean() }),
+    /** The turret: current robot-relative angle in degrees, and whether the robot has a turret at all. */
+    turret: t.object({ angleDeg: t.number('deg'), hasTurret: t.boolean() }),
     /** The camera: `seesRaised(cell)` is true while it reads that CELL's AprilTags in the raised position. */
     vision: t.object({ seesRaised: t.fn([CELL], t.boolean()) }),
   }) }),
@@ -96,6 +101,7 @@ export interface OnboardEnv {
     transfer: { count: number; capacity: number; full: boolean };
     shooter: { facing: 'front' | 'rear'; type: 'catapult' | 'fifo' | 'dual'; aimed: boolean; fire(): void };
     vision: { seesRaised(cell: 'rear' | 'audience'): boolean };
+    turret: TurretSubsystem;
   } };
   out: AutoOutput;
 }
@@ -105,6 +111,19 @@ interface IntakeSubsystem {
   set(filter: IntakeFilter): void;
   /** Runs the default command for this physics step: `AUTO_TUNING.intakeDefault`. */
   stop(): void;
+}
+
+interface TurretSubsystem {
+  /** Current robot-relative turret angle in degrees (0 = mount direction, positive = CCW). NaN before first step. */
+  readonly angleDeg: number;
+  /** True if the robot has a turret. */
+  readonly hasTurret: boolean;
+  /** Commands the turret to turn left (CCW) this step. */
+  turnLeft(): void;
+  /** Commands the turret to turn right (CW) this step. */
+  turnRight(): void;
+  /** Releases manual control this step (for limited turrets, auto-aim resumes). */
+  release(): void;
 }
 
 interface DriveSubsystem {
@@ -175,6 +194,13 @@ class OnboardAdapter implements OnboardEnv {
       shooter: { facing: s.cfg.shooter.facing, type: s.cfg.shooter.type, aimed: s.turretAimed(), fire: () => { out.inputs.shootPollen = true; out.inputs.shootNectar = true; } },
       // Rotated 180°, blue's rear CELL is where red's audience CELL is, so a tree's `rear` means red's rear.
       vision: { seesRaised: cell => seesRaisedCell(s, rotate ? (cell === 'rear' ? 'audience' : 'rear') : cell) },
+      turret: {
+        get angleDeg() { const a = s.robots[s.me].turretAngle; return Number.isFinite(a) ? (a * 180) / Math.PI : NaN; },
+        get hasTurret() { return s.hasTurret; },
+        turnLeft:  () => { out.inputs.turretLeft = true;  out.inputs.turretRight = false; },
+        turnRight: () => { out.inputs.turretLeft = false; out.inputs.turretRight = true; },
+        release:   () => { out.inputs.turretLeft = false; out.inputs.turretRight = false; },
+      },
     } };
   }
 }
@@ -372,16 +398,79 @@ const FNS: Record<string, FnSpec> = {
   offset: { args: [POSE, t.number(), t.number(), t.number()], required: 3, returns: POSE, impl: (p: Pose, dx: number, dy: number, dh?: number) => ({ x: p.x + dx, y: p.y + dy, headingDeg: dh === undefined ? p.headingDeg : p.headingDeg + dh }) },
 };
 
+const intakeSet = leaf({
+  id: 'intake.set', version: 1, uses: ['intake'],
+  doc: 'Turns the intake on or off for as long as this leaf runs. `on: true` runs the intake with the given `filter`; `on: false` stops it. Never ends by itself — run it in a `parallel any` beside the steps that need it.',
+  params: {
+    on: { type: t.boolean(), doc: 'True to run the intake, false to stop it.' },
+    filter: { type: INTAKE, default: 'all', doc: 'Which elements to accept when on is true.' },
+  },
+  *run(ctx) {
+    const e = ctx.env, { on, filter } = ctx.params;
+    try {
+      for (;;) {
+        if (on) e.bots.me.intake.set(filter); else e.bots.me.intake.stop();
+        yield;
+      }
+    } finally { e.bots.me.intake.stop(); }
+  },
+});
+
+const intakeFilter = leaf({
+  id: 'intake.filter', version: 1, uses: ['intake'],
+  doc: 'Runs the intake with the given filter for as long as this leaf runs. Like `intake.run` but with a clearer name. `pollen` only picks up POLLEN; `own_nectar` only picks up your alliance\'s NECTAR; `all` takes everything. Never ends by itself.',
+  params: { filter: { type: INTAKE, doc: 'Which elements the intake accepts: all, pollen, own_nectar, or none.' } },
+  *run(ctx) {
+    try { for (;;) { ctx.env.bots.me.intake.set(ctx.params.filter); yield; } }
+    finally { ctx.env.bots.me.intake.stop(); }
+  },
+});
+
+const turretAngle = leaf({
+  id: 'turret.angle', version: 1, uses: ['turret'],
+  doc: 'Turns the turret to a robot-relative angle in degrees (0 = mount direction, positive = CCW). Ends when it arrives within 2° or after `timeoutSec`. Has no effect on robots without a turret.',
+  params: {
+    degrees: { type: t.number('deg'), doc: 'Target angle from the mount direction in degrees. 0 = straight ahead, 90 = left, -90 = right, 180 = behind.' },
+    timeoutSec: { type: t.number('s'), min: 0, unit: 's', default: 2, doc: 'Gives up after this many seconds.' },
+  },
+  *run(ctx) {
+    const e = ctx.env, p = ctx.params, timer = stepTimer(e); begin(e, ctx.path, 'turret.angle');
+    if (!e.bots.me.turret.hasTurret) return yield* idle();
+    for (;;) {
+      if (timer.over(p.timeoutSec)) { e.bots.me.turret.release(); return yield* idle(); }
+      const cur = e.bots.me.turret.angleDeg;
+      if (!Number.isFinite(cur)) { yield; continue; }
+      // Shortest-path delta in [-180, 180]
+      const diff = ((((p.degrees - cur) % 360) + 540) % 360) - 180;
+      if (Math.abs(diff) < 2) { e.bots.me.turret.release(); return yield* idle(); }
+      if (diff > 0) e.bots.me.turret.turnLeft(); else e.bots.me.turret.turnRight();
+      yield;
+    }
+  },
+});
+
+const turretHold = leaf({
+  id: 'turret.hold', version: 1, uses: ['turret'],
+  doc: 'Holds the turret at its current robot-relative angle for as long as this leaf runs by releasing manual control each step. For a full-range (360°) turret this freezes the angle. For a limited-range turret, auto-aim resumes when released — use `turret.angle` to set a specific aim instead. Never ends by itself.',
+  params: {},
+  *run(ctx) {
+    try { for (;;) { ctx.env.bots.me.turret.release(); yield; } }
+    finally { ctx.env.bots.me.turret.release(); }
+  },
+});
+
 export const AUTO_REGISTRY: Registry = {
   envs: { onboard: ONBOARD_SCHEMA },
-  leaves: Object.fromEntries([driveTo, followPath, push, intakeRun, shoot, waitTip, waitUntil, wait].map(l => [l.id, l])),
+  leaves: Object.fromEntries([driveTo, followPath, push, intakeRun, intakeSet, intakeFilter, shoot, waitTip, waitUntil, wait, turretAngle, turretHold].map(l => [l.id, l])),
   fns: FNS,
 };
 
 // ---- Trees ----
 
+/** Blank plans are templates with an empty root sequence: they load as drafts (recorded in `AUTO_PROBLEMS`), so the editor can clone them but a robot never runs them. Strict loading would throw on their empty `children` and take down the page. */
+const DRAFT_TEMPLATES = new Set<unknown>([blankRight, blankLeft]);
 /** The AUTO tree files in the order of the page's AUTO list. The catalog in D1 is seeded from them. */
-export const AUTO_FILES: readonly unknown[] = [wallSweepRight, wallSweepLeft, laneSweepRight, laneSweepLeftNoPark, laneSweepLeft, soloSweep, soloSweepNoPark, leaveAndPark];
+export const AUTO_FILES: readonly unknown[] = [wallSweepRight, wallSweepLeft, laneSweepRight, laneSweepLeftNoPark, laneSweepLeft, soloSweep, soloSweepNoPark, leaveAndPark, blankRight, blankLeft, custom32294];
 const trees: Record<string, TreeDef> = {}, sources: Record<string, Record<string, unknown>> = {}, builtIn = new Set<string>(), problems: Record<string, readonly LoadIssue[]> = {};
 /** The AUTO trees by id: the tree files, then the trees that `addAutoTree` adds. A tree file that doesn't load throws with all of its problems. */
 export const AUTO_TREES: Readonly<Record<string, TreeDef>> = trees;
@@ -394,7 +483,7 @@ export const BUILT_IN_AUTO: ReadonlySet<string> = builtIn;
  * field editor can show it, but a robot doesn't run it: see `Coach.update`.
  */
 export const AUTO_PROBLEMS: Readonly<Record<string, readonly LoadIssue[]>> = problems;
-for (const src of AUTO_FILES) builtIn.add(addAutoTree(src).id);
+for (const src of AUTO_FILES) builtIn.add(addAutoTree(src, DRAFT_TEMPLATES.has(src)).id);
 
 /**
  * Loads an AUTO tree and adds it to `AUTO_TREES`, or replaces the tree that has its id. The page adds the trees that

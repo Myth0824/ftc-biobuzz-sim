@@ -174,7 +174,7 @@ describe('plans', () => {
   it("can't replace or remove a built-in tree", () => {
     expect(() => addAutoTree(source('leave-and-park'))).toThrow(/built in/);
     expect(removeAutoTree('leave-and-park')).toBe(false);
-    expect(BUILT_IN_AUTO.size).toBe(8);
+    expect(BUILT_IN_AUTO.size).toBe(11);
   });
   it('runs in the match: a moved first pose moves where the robot launches', () => {
     const id = 'solo-two-tip-sweep', plan = copy(id), s1 = editHandles(AUTO_TREES[id], newSim().view(0))[0];

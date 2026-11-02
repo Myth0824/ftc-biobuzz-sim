@@ -17,8 +17,8 @@ function simWith(sizeIn: number, facing: 'front' | 'rear' = 'rear') {
 }
 
 describe('AUTO trees', () => {
-  it('loads all eight trees, in the order of the AUTO list', () => {
-    expect(Object.keys(AUTO_TREES)).toEqual(['wall-sweep-pair-right', 'wall-sweep-pair-left', 'lane-sweep-pair-right', 'lane-sweep-pair-left-no-park', 'lane-sweep-pair-left', 'solo-two-tip-sweep', 'solo-two-tip-sweep-no-park', 'leave-and-park']);
+  it('loads all of the tree files, in the order of the AUTO list', () => {
+    expect(Object.keys(AUTO_TREES)).toEqual(['wall-sweep-pair-right', 'wall-sweep-pair-left', 'lane-sweep-pair-right', 'lane-sweep-pair-left-no-park', 'lane-sweep-pair-left', 'solo-two-tip-sweep', 'solo-two-tip-sweep-no-park', 'leave-and-park', 'blank-right', 'blank-left', '32294-custom']);
     // A plan has no partner field: each red robot's plan is picked on its own. The Default setting pairs them in `autoFor`.
     for (const def of Object.values(AUTO_TREES)) expect(def.meta.partner).toBeUndefined();
     for (const def of Object.values(AUTO_TREES)) expect(def.env).toBe('onboard');
@@ -49,7 +49,7 @@ describe('TELEOP tree', () => {
 describe('tree files', () => {
   it('names each file after its tree id, and keeps AUTO and TELEOP trees in their own folders', () => {
     const files = import.meta.glob<{ id: string; env: string }>('../src/auto/trees/*/*.json', { eager: true, import: 'default' });
-    expect(Object.keys(files)).toHaveLength(9);
+    expect(Object.keys(files)).toHaveLength(12);
     for (const [path, tree] of Object.entries(files)) {
       const [folder, file] = path.split('/').slice(-2);
       expect(tree.id).toBe(file.replace(/\.json$/, ''));

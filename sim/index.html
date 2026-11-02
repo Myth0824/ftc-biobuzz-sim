@@ -115,9 +115,10 @@
   .bothead { display: flex; align-items: center; gap: 6px; } .bothead b { min-width: 52px; font: 700 12px ui-monospace, SFMono-Regular, Menlo, monospace; padding: 1px 5px; border-radius: 4px; color: #fff; text-align: center; }
   .bothead span { flex: 1; color: var(--dim); font-size: 11px; } .botdesc { margin-top: 5px; font-size: 12px; line-height: 1.45; color: var(--dim); } .botdesc div:first-child { color: var(--fg); }
   @media (max-width: 520px) { #botlist { grid-template-columns: minmax(0, 1fr); grid-template-rows: none; grid-auto-flow: row; } }
-  button.gear { width: 22px; height: 22px; margin: 0; padding: 0; line-height: 1; border-radius: 5px; font-size: 14px; } #top .teams div { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin: 1px 0; }
+  button.gear { width: 22px; height: 22px; margin: 0; padding: 0; line-height: 1; border-radius: 5px; font-size: 14px; display: inline-flex; align-items: center; justify-content: center; } #top .teams div { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin: 1px 0; }
   #top .teams button.gear { background: rgba(0,0,0,.25); border-color: rgba(255,255,255,.25); color: #fff; width: 18px; height: 18px; font-size: 12px; }
   body.playing button.gear { display: none; }
+  body.playing.paused button.gear { display: inline-flex; opacity: 0.7; }
   #botcfg { top: 84px; left: 50%; transform: translateX(-50%); width: 300px; z-index: 6; } #botcfg h2 { color: var(--fg); } #botcfg input { width: 120px; } #botcfg select { max-width: 176px; } #botcfg label { gap: 8px; white-space: nowrap; } #botcfg .btns { display: flex; gap: 6px; margin-top: 8px; } #botcfg .btns button { margin: 0; }
   input[type=number] { background: #232831; color: var(--fg); border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; font: inherit; }
   .errhead { display: flex; justify-content: space-between; align-items: center; margin: 8px 0 2px; color: var(--fg); font-size: 12px; } .chips { display: flex; gap: 4px; } .chips button { width: auto; margin: 0; padding: 2px 9px; border-radius: 999px; font-size: 11px; }
@@ -140,6 +141,13 @@
   #aehead { font-weight: 700; } #aeframe { color: #ff8a80; font-size: 11px; } #aesel { color: var(--dim); font-variant-numeric: tabular-nums; }
   body.editing #banner, body.editing #final { display: none !important; }
   .hidden { display: none !important; }
+  /* Persistent controller/keyboard status bar at the bottom of the screen */
+  #statusbar { position: fixed; bottom: 0; left: 0; right: 0; z-index: 10; display: flex; gap: 12px; align-items: center; padding: 4px 14px; background: rgba(10,12,16,.88); border-top: 1px solid var(--line); backdrop-filter: blur(6px); font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--dim); flex-wrap: wrap; }
+  #statusbar .sb-item { display: flex; align-items: center; gap: 5px; white-space: nowrap; }
+  #statusbar .sb-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  #statusbar .ok { color: var(--ok); } #statusbar .warn { color: #ffb74d; }
+  #statusbar .dot-ok { background: var(--ok); } #statusbar .dot-off { background: #3a3f4a; } #statusbar .dot-kb { background: #4d7dff; }
+  body.editing #statusbar { bottom: 54px; }
 </style>
 </head>
 <body>
@@ -171,18 +179,20 @@
   <div class="mhead"><h2 id="setuphead">Game setup</h2><button class="ib" data-close title="Close (Esc)" aria-label="Close"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button></div>
   <div class="cols"><div>
     <h2>Match</h2>
-    <label title="Which periods the MATCH runs: AUTO and TELEOP with the transition between them, or one period alone.">Periods <select id="mode"><option value="full">Full 2:30</option><option value="teleop">TELEOP 2:00</option><option value="auto">AUTO 0:30</option></select></label>
+    <label title="Which periods the MATCH runs: AUTO and TELEOP with the transition between them, or one period alone.">Periods <select id="mode"><option value="full">Full 2:30</option><option value="teleop">TELEOP only 2:00</option><option value="auto">AUTO only 0:30</option><option value="practice">Practice (unlimited)</option></select></label>
+    <label title="How many AI opponent robots appear on the field alongside your robot.">Opponents <select id="opponents"><option value="0">0 — solo practice</option><option value="1">1 — red partner only</option><option value="2">2 — red + one blue</option><option value="3" selected>3 — full field</option></select></label>
     <label title="In a playoff MATCH there are no ranking points, so the planner maximizes points alone.">Stage <select id="stage"><option value="qual">Qualification</option><option value="playoff">Playoff</option></select></label>
     <h2>This match</h2>
-    <div class="btns"><button id="nexport" title="Downloads the notes as Markdown and the match trace as JSON.">Export</button><button id="ncopy" title="Copies the path of the annotation file in the repository.">Copy notes path</button></div>
-    <div id="nsaved">Click a robot in the review to add a note.</div>
+    <div id="nsaved" style="color:var(--dim);font-size:11px;margin-bottom:4px">Settings save automatically.</div>
+    <div class="btns"><button id="nexport" title="Downloads the notes as Markdown and the match trace as JSON.">Export match</button><button id="ncopy" title="Copies the path of the annotation file in the repository.">Copy notes path</button></div>
   </div><div>
     <h2>Options</h2>
     <label>Camera <select id="camera"><option value="driver">Driver station</option><option value="overhead">Overhead</option><option value="chase">Chase</option><option value="audience">Audience</option></select></label>
     <label>Units <select id="units"><option value="metric">Metric</option><option value="us">US</option></select></label>
     <label>Sound <select id="sound"><option value="on">On</option><option value="off">Off</option></select></label>
     <label title="Shows a robot's behavior tree: the running nodes, and each other node's last result. It follows the review cursor too.">Tree view <select id="treeview"><option value="off">Off</option><option value="on">On</option></select></label>
-    <label title="Draws the AUTO plan of the robot that the view follows as a dashed orange line, and the path that the planner drives in blue. The AUTO editor always draws them.">AUTO paths <select id="autopaths"><option value="on">On</option><option value="off">Off</option></select></label>
+    <label>AUTO paths <select id="autopaths"><option value="on">On</option><option value="off">Off</option></select></label>
+    <label title="Shows a dotted arc predicting where your next shot will land.">Shot trajectory <select id="showtraj"><option value="on">On</option><option value="off">Off</option></select></label>
     <label>Referee <select id="referee"><option value="rule">PINS (G421)</option><option value="off">Off</option></select></label>
   </div></div>
   <div class="rowhead"><h2>Robots</h2><button id="editauto" title="Shows the red robots' AUTO plans on the FIELD. Create a plan from a copy of any plan, and drag its poses.">Edit AUTO paths</button></div>
@@ -190,16 +200,16 @@
 </div></div>
 <div id="botcfg" class="panel hidden"><h2 id="bchead"></h2>
   <label>Number plate <input id="bcplate" type="text" maxlength="6"></label>
-  <label id="bcdriverrow">Driver <select id="bcdriver"><option value="planner">Planner</option><option value="pad1">Controller 1</option><option value="pad2">Controller 2</option></select></label>
+  <label id="bcdriverrow">Driver <select id="bcdriver"><option value="pad1">Controller</option><option value="keyboard">Keyboard (WASD)</option></select></label>
   <label id="bcdriverow">Stick frame <select id="bcdrive"><option value="field">Field-centric</option><option value="robot">Robot-centric</option></select></label>
   <label>Shooter <select id="bcshooter"><option value="dual">Dual, by type</option><option value="fifo">Single, FIFO</option><option value="catapult">Catapult, all 4</option></select></label>
-  <label>Intake <select id="bcintake"><option value="front">Front</option><option value="dual">Front and rear</option></select></label>
-  <label title="A turret aims each launch at the raised CELL, whatever the robot's heading, with full range of motion and an instant slew: an upper bound on what a turret can do.">Launches from <select id="bcends"><option value="one">The rear end</option><option value="both">Both ends</option><option value="turret">A turret</option></select></label>
+  <label id="bcinrow">Intake <select id="bcintake"><option value="front">Front</option><option value="dual">Front and rear</option></select></label>
+  <label id="bcendsrow" title="A turret aims each launch at the raised CELL, whatever the robot's heading, with full range of motion and an instant slew: an upper bound on what a turret can do.">Launches from <select id="bcends"><option value="one">The rear end</option><option value="both">Both ends</option><option value="turret">A turret</option></select></label>
   <label id="bcturretrow" title="The turret's range of motion, centered on the shooter's facing, and its top turn rate. An empty turn rate is an instant slew.">Turret range, ° <input id="bcturretrange" type="number" min="30" max="360" step="5"></label>
   <label id="bcslewrow">Turret turn rate, °/s <input id="bcturretslew" type="number" min="10" max="3600" step="10" placeholder="instant"></label>
   <label>AUTO plan <select id="bcauto"></select></label>
   <button id="bcedit" type="button" title="Opens the AUTO editor on this robot. Plans are written in red's frame, and blue robots run them rotated 180°.">Edit AUTO paths</button>
-  <label>TELEOP plan <select id="bcplan"><option value="0">Keep tipping</option><option value="30">FLOWERS from 30 s</option><option value="45">FLOWERS from 45 s</option><option value="66">FLOWERS from 66 s</option></select></label>
+  <label id="bcplanrow">TELEOP plan <select id="bcplan"><option value="0">Keep tipping</option><option value="30">FLOWERS from 30 s</option><option value="45">FLOWERS from 45 s</option><option value="66">FLOWERS from 66 s</option></select></label>
   <div class="errhead"><span title="How much one shot differs from the next, as one standard deviation. Measure it: launch 20 elements from one spot.">Launcher error, 1 SD</span><span class="chips"><button type="button" data-err="1">1x</button><button type="button" data-err="3">3x</button><button type="button" data-err="5">5x</button></span></div>
   <label>Elevation, ° <input id="bcelev" type="number" min="0" max="15" step="0.1"></label>
   <label>Azimuth, ° <input id="bcazim" type="number" min="0" max="15" step="0.1"></label>
@@ -214,36 +224,180 @@
   <div class="btns"><button id="bcdone" class="primary">Done</button><button id="bcdefault" title="A four-element catapult, 30 cm (12 in.), 7 kg (15.4 lb), 500 rpm, and intakes at both ends.">Meta build</button><button id="bcbaseline" title="The reference robot of the experiments: 38 cm (15 in.), 10 kg (22 lb), 600 rpm, two at a time, and a front intake.">Baseline</button></div>
 </div>
 <div id="tree" class="panel hidden"><h2 id="treehead"></h2><div id="treebots"></div><div id="treebody"></div></div>
-<div id="helpbox" class="modal hidden"><div class="panel" role="dialog" aria-modal="true" aria-labelledby="helphead">
-  <div class="mhead"><h2 id="helphead">Help</h2><button class="ib" data-close title="Close (Esc)" aria-label="Close"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button></div>
+<div id="helpbox" class="modal hidden"><div class="panel" role="dialog" aria-modal="true" aria-labelledby="helphead" style="width:640px;max-width:calc(100vw - 24px);max-height:calc(100vh - 88px);overflow-y:auto">
+  <div class="mhead"><h2 id="helphead">Help — BIOBUZZ Simulator (Team 32294)</h2><button class="ib" data-close title="Close (Esc)" aria-label="Close"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button></div>
+
+  <h2>Quick start</h2>
+  <div class="keys">1. Open <b>Game Setup</b> (⚙ in the control bar) and pick your <b>Periods</b> and <b>Opponents</b>. 2. Your robot is <b>32294 H</b> (red alliance, right start). Set its <b>Driver</b> to Controller or Keyboard in the gear ⚙ config. 3. Press <b>Play</b> or <b>Space</b> to start. The other robots are driven by the AI planner.</div>
+
   <div class="cols"><div>
-    <h2>Controller</h2>
-    <div class="keys grid"><b>Left stick</b><span>Drive and strafe</span><b>Right stick</b><span>Turn</span><b>LB</b><span>Shoot NECTAR</span><b>RB</b><span>Shoot POLLEN</span><b>LT</b><span>Place POLLEN in a FLOWER</span><b>RT</b><span>Place NECTAR in a FLOWER</span><b>Start</b><span>Start the MATCH</span><b>View</b><span>Change the camera</span></div>
-    <div id="pad"></div>
+    <h2>Controller (gamepad)</h2>
+    <div class="keys grid">
+      <b>Left stick</b><span>Drive and strafe</span>
+      <b>Right stick X</b><span>Turn</span>
+      <b>LB</b><span>Shoot NECTAR</span>
+      <b>RB</b><span>Shoot POLLEN</span>
+      <b>LT</b><span>Place POLLEN in FLOWER</span>
+      <b>RT</b><span>Place NECTAR in FLOWER</span>
+      <b>D-pad ← →</b><span>Rotate turret left / right</span>
+      <b>Start</b><span>Start the MATCH</span>
+      <b>View / Select</b><span>Change the camera</span>
+    </div>
+    <div id="pad" style="margin-top:4px;font-size:11px;color:var(--dim)"></div>
+    <p style="color:var(--dim);font-size:11px;margin:4px 0 0">Plug in your controller and press any button to activate it.</p>
+
+    <h2>Keyboard (WASD)</h2>
+    <div class="keys grid">
+      <b>W / S</b><span>Forward / back</span>
+      <b>A / D</b><span>Strafe left / right</span>
+      <b>Q / E</b><span>Turn left / right</span>
+      <b>↑ Up</b><span>Shoot (POLLEN first, then NECTAR)</span>
+      <b>↓ Down</b><span>Hold to intake</span>
+      <b>← → arrows</b><span>Rotate turret left / right</span>
+      <b>Z</b><span>Place in FLOWER</span>
+    </div>
+    <p style="color:var(--dim);font-size:11px;margin:4px 0 0">Set Driver to <b style="color:var(--fg)">Keyboard (WASD)</b> in the robot config (gear icon).</p>
   </div><div>
-    <h2>Keys</h2>
-    <div class="keys grid"><b>Space</b><span>Play or pause</span><b>Enter</b><span>Start the MATCH</span><b>R</b><span>Reset the field</span><b>Left arrow</b><span>Previous mark</span><b>Right arrow</b><span>Next mark</span><b>M</b><span>Mark this moment</span><b>V</b><span>Review, or go back to live</span><b>C</b><span>Change the camera</span><b>Esc</b><span>Close this box</span></div>
+    <h2>App keys</h2>
+    <div class="keys grid">
+      <b>Space</b><span>Play or pause</span>
+      <b>Enter</b><span>Start the MATCH</span>
+      <b>R</b><span>Reset the field</span>
+      <b>← →</b><span>Timeline: previous / next mark</span>
+      <b>M</b><span>Mark this moment</span>
+      <b>V</b><span>Open the review</span>
+      <b>C</b><span>Change the camera</span>
+      <b>Esc</b><span>Close any popup</span>
+    </div>
+
+    <h2>While paused</h2>
+    <div class="keys grid">
+      <b>← →</b><span>Pan camera left / right</span>
+      <b>↑ ↓</b><span>Zoom in / out</span>
+      <b>Gear icon ⚙</b><span>Edit robot config mid-match</span>
+    </div>
+    <p style="color:var(--dim);font-size:11px;margin:4px 0 0">Changing a setting while paused keeps the match paused — press Play to continue, or Reset to apply changes that need a full rebuild.</p>
   </div></div>
+
   <h2>Mouse</h2>
-  <div class="keys grid"><b>Gear icon</b><span>Robot config. The icons are in the scoreboard and the game setup.</span><b>Right-click a robot</b><span>Robot config</span><b>Click the floor</b><span>The field position</span><b>Click a robot</b><span>In the review, adds a note at the cursor</span></div>
-  <h2>Timeline</h2>
-  <div class="keys">Gray ticks mark the MATCH start, the TELEOP start, FLOWERS open (1:00), the endgame (0:20), and the MATCH end. Dots are notes: red or blue for a robot, and yellow for a marked moment. The referee's FOULS add a note on the robot that the FOUL is called on. During a MATCH, drag the thumb back or press the previous-mark button to review: the MATCH waits until you go back to live.</div>
-  <div class="links"><a href="/">NCSSM FTC home</a> · <a href="https://github.com/caryden/ftc-biobuzz-sim">Source on GitHub</a></div>
+  <div class="keys grid">
+    <b>Gear ⚙ icon</b><span>Open robot config (in scoreboard or Game Setup)</span>
+    <b>Right-click a robot</b><span>Open that robot's config</span>
+    <b>Click the floor</b><span>Shows the field coordinate at that point</span>
+    <b>Click a robot (review)</b><span>Add a note at the current cursor position</span>
+  </div>
+
+  <h2>Review camera (mouse)</h2>
+  <div class="keys grid">
+    <b>Left drag</b><span>Orbit — rotate around the field from any angle</span>
+    <b>Right drag</b><span>Pan — move the look-at point</span>
+    <b>Scroll wheel</b><span>Zoom in / out</span>
+    <b>← → ↑ ↓</b><span>Pan the look-at point with the keyboard</span>
+  </div>
+  <p style="color:var(--dim);font-size:11px;margin:4px 0 0">The review camera activates automatically when you open the review (V). It exits when you click Go Live or press R.</p>
+
+  <h2>Game setup (⚙ in the control bar)</h2>
+  <div class="keys grid">
+    <b>Periods</b><span>Full 2:30 · TELEOP only 2:00 · AUTO only 0:30 · Practice (unlimited)</span>
+    <b>Opponents</b><span>0 (solo) · 1 (red partner) · 2 (+one blue) · 3 (full field)</span>
+    <b>Shot trajectory</b><span>On/Off — shows the dotted arc predicting where your next shot lands</span>
+    <b>AUTO paths</b><span>On/Off — shows the AI's planned path on the field</span>
+    <b>Referee</b><span>Enables/disables the PIN foul (G421) rule</span>
+    <b>Tree view</b><span>Shows the AI behaviour tree running live</span>
+  </div>
+
+  <h2>Robot config (gear ⚙ icon)</h2>
+  <div class="keys grid">
+    <b>Driver</b><span>Controller · Keyboard (WASD) — only available for team 32294 (H)</span>
+    <b>Stick frame</b><span>Field-centric (push stick = move that direction on field) or Robot-centric</span>
+    <b>Shooter</b><span>Dual (by type) · Single FIFO · Catapult (all 4 at once)</span>
+    <b>AUTO plan</b><span>Which path the robot runs in the 30 s AUTO period</span>
+    <b>Drive motor</b><span>RPM — faster = more speed, less torque</span>
+    <b>Chassis / Mass</b><span>Size and weight affect inertia and turning</span>
+    <b>Launcher error</b><span>How accurate each shot is — 1x is realistic, 5x is very inaccurate</span>
+  </div>
+  <p style="color:var(--dim);font-size:11px;margin:4px 0 0">AI robots (B badge) also have: Defense policy, TELEOP plan (when to switch to FLOWER work), and intake success rate.</p>
+
+  <h2>The turret (team 32294)</h2>
+  <div class="keys">Your robot always has a full 360° turret. It starts aimed straight forward. Use ← → arrows (keyboard) or D-pad (controller) to rotate it — right arrow turns clockwise, left turns counterclockwise, at 180°/s. The dotted arc shows where the next shot will land. The turret holds its angle when you release the keys.</div>
+
+  <h2>Intake</h2>
+  <div class="keys">Hold ↓ (keyboard) or LT (controller) to run the intake. Release to stop. The AI robots intake automatically. Picking up opponent NECTAR (blue balls) is allowed but triggers a G408 minor foul (+5 pts to the opponent).</div>
+
+  <h2>Scoreboard</h2>
+  <div class="keys"><b style="color:var(--ok)">H</b> = human-driven (team 32294). <b style="color:var(--dim)">B</b> = AI robot (bot). The gear icon ⚙ opens that robot's config. During a match the gear icons are hidden — pause first to access them.</div>
+
+  <h2>Timeline and review</h2>
+  <div class="keys">The scrubber bar shows the full match. Gray ticks = MATCH start, TELEOP start, FLOWERS open (1:00), endgame (0:20), and MATCH end. Colored dots = notes. Drag the thumb back during a live match to review — the match waits. Press V or click the Review button to enter full review mode with free-look camera. Press Go Live or R to return.</div>
+
+  <h2>AUTO path editor</h2>
+  <div class="keys">Your robot runs an AI plan during the 30 s AUTO. To edit it: open <b>Game Setup → Edit AUTO paths</b>, or click the gear ⚙ on 32294 and choose a plan, then click <b>Edit AUTO paths</b>.</div>
+  <div class="keys grid" style="margin-top:6px">
+    <b>Orange dots</b><span>Each dot is a pose (position + heading). Drag to move it.</span>
+    <b>Arrow on dot</b><span>The robot's heading at that position. Drag the tip to rotate.</span>
+    <b>Create new</b><span>Makes a new plan as a copy of any existing one</span>
+    <b>Edit button</b><span>Unlocks dragging for your plan (system plans are read-only)</span>
+    <b>Undo / Redo</b><span>Cmd+Z / Shift+Cmd+Z</span>
+    <b>Reset this step</b><span>Puts a step back to its original position</span>
+    <b>Delete plan</b><span>Removes your custom plan</span>
+    <b>Snap</b><span>Snaps drags to a 1-inch grid. Hold Alt to bypass.</span>
+  </div>
+  <p style="color:var(--dim);font-size:11px;margin:6px 0 0">To add more positions, change intake/turret behaviour, or write a completely custom path, edit the JSON file directly at <b>biobuzz-sim/src/auto/trees/auto/32294-custom.json</b>. See below for the full reference.</p>
+
+  <h2>AUTO path JSON reference</h2>
+  <div class="keys">A path is a JSON file with four sections: <b>defs</b> (named positions), <b>root</b> (the steps), and a few header fields. All positions use red-alliance coordinates: x = red wall (−) to blue wall (+), y = audience (−) to rear (+), headingDeg = degrees CCW from +x axis.</div>
+  <div class="keys grid" style="margin-top:6px">
+    <b>pose(x, y, deg)</b><span>Define a field position, e.g. pose(−0.5, 1.2, 90)</span>
+    <b>offset(p, dx, dy)</b><span>Move a named pose by dx, dy meters</span>
+    <b>field.hiveX</b><span>X of the HIVE pivot (−0.32 m)</span>
+    <b>field.half</b><span>Half the field (1.79 m)</span>
+    <b>field.flowerFar / Near</b><span>Flower X and Y distances from center</span>
+    <b>bots.me.dimensions.length</b><span>Robot length — use for wall offset math</span>
+    <b>clock.remaining</b><span>Seconds left — use in waitUntil conditions</span>
+  </div>
+  <p style="color:var(--dim);font-size:11px;margin:6px 0 0"><b>Actions (ref):</b></p>
+  <div class="keys grid">
+    <b>drive.driveTo</b><span>Drive to a pose. Params: pose, timeoutSec</span>
+    <b>drive.followPath</b><span>Follow waypoints in order. Params: waypoints, timeoutSec</span>
+    <b>drive.push</b><span>Push straight. Params: power (−1 to 1), timeoutSec</span>
+    <b>shooter.shoot</b><span>Fire balls. Params: count, timeoutSec, cell (optional)</span>
+    <b>intake.run</b><span>Run intake while parallel steps run. Params: filter</span>
+    <b>intake.set</b><span>Turn intake on/off. Params: on (true/false), filter</span>
+    <b>intake.filter</b><span>Run intake with filter. Params: filter (all/pollen/own_nectar/none)</span>
+    <b>turret.angle</b><span>Aim turret to degrees. Params: degrees, timeoutSec. 0=forward, 90=left, −90=right, 180=behind</span>
+    <b>turret.hold</b><span>Hold turret at current angle. No params.</span>
+    <b>wait</b><span>Wait fixed time. Params: timeoutSec</span>
+    <b>waitUntil</b><span>Wait for condition. Params: condition (expression), timeoutSec</span>
+    <b>vision.waitTip</b><span>Wait for HIVE to tip. Params: cell (rear/audience), timeoutSec</span>
+  </div>
+  <p style="color:var(--dim);font-size:11px;margin:6px 0 0"><b>Structure keywords:</b> <code>sequence</code> runs children in order. <code>parallel policy:any</code> runs all children at once and stops when any one finishes — use this to run the intake alongside a drive step.</p>
+
+  <div class="links" style="margin-top:12px"><button id="openkeybinds" style="width:auto;margin:0;padding:2px 10px;font-size:12px">Configure Key Bindings</button></div>
+</div></div>
+<div id="keybinds" class="modal hidden"><div class="panel" role="dialog" aria-modal="true" aria-labelledby="kbhead" style="width:340px">
+  <div class="mhead"><h2 id="kbhead">Key Bindings</h2><button class="ib" data-close title="Close (Esc)" aria-label="Close"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button></div>
+  <p style="color:var(--dim);font-size:11px;margin:0 0 8px">Click a row then press any key to rebind. Changes save instantly.</p>
+  <table id="kbtable" style="width:100%;border-collapse:collapse;font-size:12px"></table>
+  <div class="btns" style="margin-top:8px"><button id="kbreset">Reset to defaults</button></div>
 </div></div>
 <div id="toasts" aria-live="polite"></div>
+<div id="statusbar" aria-live="polite"></div>
 <div id="notepop" class="panel hidden"><h2 id="nhead"></h2><textarea id="ntext" rows="3" placeholder="What happened here?"></textarea>
   <div class="btns"><button id="nsave" class="primary">Save (Enter)</button><button id="ndel">Delete</button><button id="ncancel">Cancel (Esc)</button></div></div>
 <div id="autoedit" class="panel hidden"><div class="aeinfo"><div><span id="aehead"></span> <span id="aestatus"></span> <span id="aeframe"></span></div><div id="aesel"></div></div>
-  <button id="aeedit" title="Lets you drag the poses of this plan.">Edit</button><button id="aecreate" title="Makes a new plan from a copy of any plan for this robot's start position. The new plan becomes this robot's plan.">Create new</button> <label id="aesnaprow" title="Snaps a drag to a 1 in grid and a turn to 5°. Hold Alt, or Option on a Mac, while you drag to do the opposite."><input type="checkbox" id="aesnap"> Snap</label><button id="aeundo" title="Takes back the last edit (Cmd+Z or Ctrl+Z).">Undo</button><button id="aeredo" title="Makes the edit again (Shift+Cmd+Z or Shift+Ctrl+Z).">Redo</button><button id="aereset" title="Moves the selected step's poses back to where the plan that this one was copied from has them.">Reset this step</button><button id="aedelete" title="Deletes this plan. Every robot that ran it goes back to the plan that it was copied from.">Delete plan</button><button id="aedone" class="primary">Done</button></div>
+  <button id="aeedit" title="Lets you drag the poses of this plan.">Edit</button><button id="aecreate" title="Makes a new plan from a copy of any plan for this robot's start position. The new plan becomes this robot's plan.">Create new</button> <label id="aesnaprow" title="Snaps a drag to a 1 in grid and a turn to 5°. Hold Alt, or Option on a Mac, while you drag to do the opposite."><input type="checkbox" id="aesnap"> Snap</label><button id="aeundo" title="Takes back the last edit (Cmd+Z or Ctrl+Z).">Undo</button><button id="aeredo" title="Makes the edit again (Shift+Cmd+Z or Shift+Ctrl+Z).">Redo</button><button id="aereset" title="Moves the selected step's poses back to where the plan that this one was copied from has them.">Reset this step</button><button id="aedelete" title="Deletes this plan. Every robot that ran it goes back to the plan that it was copied from.">Delete plan</button><button id="aehelp" title="How to use the AUTO path editor" style="font-weight:700">?</button><button id="aedone" class="primary">Done</button></div>
 <div id="aehover" class="hidden"></div>
 <div id="aeinsp" class="panel hidden"></div>
-<div id="aemenu" class="panel hidden"><button id="aeaddref">Add reference point here</button><button id="aeabs"></button><button id="aedelref"></button></div>
+<div id="stepSettings" class="panel hidden" style="position:fixed;right:12px;bottom:78px;width:310px;z-index:5;font-size:12px;padding:10px 12px"></div>
+<div id="stepOrder" class="panel hidden" style="position:fixed;right:330px;bottom:78px;width:220px;z-index:5;font-size:12px;padding:8px 10px;max-height:calc(100vh - 120px);overflow-y:auto"></div>
+<div id="aemenu" class="panel hidden"><button id="aeaddref">Add reference point here</button><button id="aedrivetoref" class="hidden">Drive to this reference point</button><button id="aeabs"></button><button id="aedelref"></button></div>
 <div id="aerefname" class="panel hidden"><h2>New reference point</h2>
   <label>Name <input id="aerefinput" type="text" maxlength="40" placeholder="For example, rearSpot"></label>
   <div id="aereferr"></div>
   <div class="btns"><button id="aerefadd" class="primary">Add</button><button id="aerefcancel">Cancel</button></div></div>
 <div id="aenew" class="panel hidden"><h2>New AUTO plan</h2>
-  <label>Copy of <select id="aefrom"></select></label>
+  <label>Mode <select id="aemode"><option value="copy">Copy an existing plan</option><option value="blank">Start from scratch (blank)</option></select></label>
+  <label id="aefromrow">Copy of <select id="aefrom"></select></label>
   <label>Name <input id="aename" type="text" maxlength="80" placeholder="For example, Rear sweep first"></label>
   <textarea id="aedesc" rows="3" placeholder="What the plan does, in a sentence or two"></textarea>
   <div id="aeerr"></div>

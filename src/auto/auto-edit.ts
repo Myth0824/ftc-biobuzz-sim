@@ -307,3 +307,84 @@ export function changedDefs(tree: Json, original: Json): Set<string> {
   const a = (tree.defs ?? {}) as Json, b = (original.defs ?? {}) as Json;
   return new Set([...Object.keys(a), ...Object.keys(b)].filter(k => a[k] !== b[k]));
 }
+
+// ---- Step insertion, reordering, and deletion ----
+
+/**
+ * Generates a step id that is unique within a children array. Tries `base`, then `base-2`, `base-3`, etc.
+ */
+function uniqueId(children: unknown[], base: string): string {
+  const used = new Set((children as Json[]).map(c => (c as Json).id).filter(Boolean));
+  let id = base; for (let n = 2; used.has(id); n++) id = `${base}-${n}`;
+  return id;
+}
+
+/**
+ * Walks the tree JSON looking for the top-level `sequence.children` array — the outermost sequence that holds all
+ * the steps. Returns the array or null if the tree has no such root sequence.
+ */
+export function rootSequence(tree: Json): Json[] | null {
+  const root = tree.root; if (!root || typeof root !== 'object') return null;
+  const seq = (root as Json).sequence; if (!seq || typeof seq !== 'object') return null;
+  const kids = (seq as Json).children; return Array.isArray(kids) ? kids as Json[] : null;
+}
+
+/**
+ * Adds a `drive.driveTo` step to the end of the root sequence that goes to the reference point named `ref`.
+ * Returns the new tree, or `{ error }` when the tree has no root sequence or the ref name is invalid.
+ */
+export function addDriveToStep(tree: Json, ref: string, pose: Pose, timeoutSec = 5): { tree: Json } | { error: string } {
+  const seq = rootSequence(tree); if (!seq) return { error: 'This plan has no root sequence to add steps to.' };
+  const out = structuredClone(tree), outSeq = rootSequence(out)!;
+  const id = uniqueId(outSeq, ref ? `go-${ref}` : 'step');
+  outSeq.push({ id, ref: 'drive.driveTo', params: { pose: ref || `pose(${num(mm(pose.x))}, ${num(mm(pose.y))}, ${num(halfDeg(wrapDeg(pose.headingDeg)))})`, timeoutSec } });
+  return { tree: out };
+}
+
+/**
+ * Adds a step at the end of the root sequence. `step` is a partial node object; an `id` is generated if absent.
+ * Returns the new tree, or `{ error }` when the tree has no root sequence.
+ */
+export function appendStep(tree: Json, step: Json): { tree: Json } | { error: string } {
+  const seq = rootSequence(tree); if (!seq) return { error: 'This plan has no root sequence to add steps to.' };
+  const out = structuredClone(tree), outSeq = rootSequence(out)!;
+  const id = uniqueId(outSeq, typeof step.id === 'string' ? step.id : 'step');
+  outSeq.push({ ...structuredClone(step), id });
+  return { tree: out };
+}
+
+/**
+ * Removes the step at `index` from the root sequence. Steps added by the step-settings panel (shoot tags) that
+ * immediately follow the removed step are also removed. Returns the new tree, or `{ error }`.
+ */
+export function removeStep(tree: Json, index: number): { tree: Json } | { error: string } {
+  const seq = rootSequence(tree); if (!seq) return { error: 'This plan has no root sequence.' };
+  if (index < 0 || index >= seq.length) return { error: 'Step index out of range.' };
+  const out = structuredClone(tree), outSeq = rootSequence(out)!;
+  const removedId = (outSeq[index] as Json).id;
+  outSeq.splice(index, 1);
+  // Also remove an immediately following shoot step that was tagged by the step-settings panel
+  if (typeof removedId === 'string' && index < outSeq.length) {
+    const next = outSeq[index] as Json;
+    if (next.id === `${removedId}-shoot`) outSeq.splice(index, 1);
+  }
+  return { tree: out };
+}
+
+/**
+ * Moves the step at `index` up (dir = -1) or down (dir = +1) in the root sequence, keeping any trailing shoot step
+ * that belongs to it together with it. Returns the new tree, or `{ error }`.
+ */
+export function moveStep(tree: Json, index: number, dir: -1 | 1): { tree: Json } | { error: string } {
+  const seq = rootSequence(tree); if (!seq) return { error: 'This plan has no root sequence.' };
+  const dest = index + dir;
+  if (dest < 0 || dest >= seq.length) return { error: 'Cannot move step further.' };
+  const out = structuredClone(tree), outSeq = rootSequence(out)!;
+  // Determine the block: step + its attached shoot step (if any)
+  const stepId = (outSeq[index] as Json).id;
+  const hasShoot = typeof stepId === 'string' && index + 1 < outSeq.length && (outSeq[index + 1] as Json).id === `${stepId}-shoot`;
+  const block = hasShoot ? outSeq.splice(index, 2) : [outSeq.splice(index, 1)[0]];
+  const insertAt = dir < 0 ? dest : dest - (block.length - 1);
+  outSeq.splice(insertAt, 0, ...block);
+  return { tree: out };
+}

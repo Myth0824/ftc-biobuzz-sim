@@ -16,8 +16,8 @@ export interface Flower { id: string; x: number; z: number; stack: BallKind[] }
 /** Driver inputs for one step. Buttons are level-triggered; the sim applies the rate limits. */
 /** Which floor elements the intake accepts. A program sets it per tactic, like a color-sensor sorter. Default: all. */
 export type IntakeFilter = 'all' | 'pollen' | 'own_nectar' | 'none';
-export interface Inputs extends DriveCommand { shootNectar: boolean; shootPollen: boolean; placeNectar: boolean; placePollen: boolean; intake?: IntakeFilter }
-export const NO_INPUT: Inputs = { forward: 0, strafeRight: 0, turnRight: 0, shootNectar: false, shootPollen: false, placeNectar: false, placePollen: false };
+export interface Inputs extends DriveCommand { shootNectar: boolean; shootPollen: boolean; placeNectar: boolean; placePollen: boolean; intake?: IntakeFilter; intakeHeld?: boolean; turretLeft?: boolean; turretRight?: boolean }
+export const NO_INPUT: Inputs = { forward: 0, strafeRight: 0, turnRight: 0, shootNectar: false, shootPollen: false, placeNectar: false, placePollen: false, turretLeft: false, turretRight: false };
 
 /** Gets the short code for a ball kind in traces and logs: P, RN, or BN. */
 export const code = (k: BallKind) => (k === 'pollen' ? 'P' : k === 'nectar_red' ? 'RN' : 'BN');
@@ -64,11 +64,16 @@ export interface RobotState {
   /** A limited turret's angle from the shooter's mount direction, in radians, or NaN before its first step. */
   turretAngle: number;
   /** The drive command of the last step, for the referee: what the robot was trying to do. */
-  lastCmd: DriveCommand;
+  lastCmd: Inputs;
 }
 export interface SimOptions {
   /** If true, the blue alliance plays. Default: false. */ opponent?: boolean;
   /** If true, every alliance that plays has two robots. Default: false. */ partners?: boolean;
+  /**
+   * Total number of AI opponent robots on the field (0–3). Overrides `opponent` and `partners` when set.
+   * 0 = just your robot. 1 = one red partner. 2 = one red partner + one blue. 3 = one red partner + two blue.
+   */
+  opponentCount?: number;
   /** If true, the MATCH is a playoff MATCH: ranking points don't exist, so the planner maximizes points alone. Default: false. */ playoff?: boolean;
   /** Gets the configuration of one robot, for experiments that vary a design. Default: the constructor's `cfg` for all. */
   configFor?: (alliance: Alliance, slot: 0 | 1) => RobotConfig | undefined;
@@ -156,9 +161,13 @@ export class Sim {
       blue: new Hive(rapier, this.world, 'blue', 'rear'),
     };
     for (const h of Object.values(this.hives)) h.epoch = 0;
-    // Order: the player's robot, its partner, then the blue robots.
-    for (const a of (options.opponent ? ['red', 'blue'] : ['red']) as Alliance[])
-      for (const slot of (options.partners ? [0, 1] : [0]) as (0 | 1)[]) this.robots.push(this.buildRobot(a, options.configFor?.(a, slot) ?? (this.robots.length ? structuredClone(cfg) : cfg), slot));
+    // Order: the player's robot, its partner (if any), then the blue robots.
+    // opponentCount overrides opponent/partners when provided: 0=solo, 1=+R1, 2=+R1+B0, 3=+R1+B0+B1
+    const oc = options.opponentCount;
+    const redSlots: (0|1)[] = oc !== undefined ? (oc >= 1 ? [0, 1] : [0]) : (options.partners ? [0, 1] : [0]);
+    const blueSlots: (0|1)[] = oc !== undefined ? (oc >= 3 ? [0, 1] : oc >= 2 ? [0] : []) : (options.opponent ? (options.partners ? [0, 1] : [0]) : []);
+    for (const slot of redSlots) this.robots.push(this.buildRobot('red', options.configFor?.('red', slot) ?? (this.robots.length ? structuredClone(cfg) : cfg), slot));
+    for (const slot of blueSlots) this.robots.push(this.buildRobot('blue', options.configFor?.('blue', slot) ?? structuredClone(cfg), slot));
     this.stageElements(new Rng((seed ^ 0x5a17c3e5) >>> 0));
     if (mode === 'practice') { this.phase = 'teleop'; this.clock = Infinity; }
   }
@@ -257,7 +266,7 @@ export class Sim {
       .setCollisionGroups(groups(GROUP.robot, GROUP.struct | GROUP.ball | GROUP.robot)), body);
     // G304.G: four pre-loaded POLLEN.
     return { alliance, slot, intent: '', plan: { phase: 'other', side: null, load: 0, claims: [], goal: null, zone: null }, cfg: c, body, carried: ['pollen', 'pollen', 'pollen', 'pollen'], telemetry: { busVoltage: 12.8, speed: 0 }, placing: null,
-      shotReadyAt: { nectar: 0, pollen: 0 }, flowerReadyAt: 0, lastForward: 0, autoLeave: false, autoPark: false, turretAngle: Number.NaN, lastCmd: { forward: 0, strafeRight: 0, turnRight: 0 } };
+      shotReadyAt: { nectar: 0, pollen: 0 }, flowerReadyAt: 0, lastForward: 0, autoLeave: false, autoPark: false, turretAngle: Number.NaN, lastCmd: { ...NO_INPUT } };
   }
 
   spawn(kind: BallKind, x: number, y: number, z: number, vel?: { x: number; y: number; z: number }, spin?: { x: number; y: number; z: number }): Ball {
@@ -343,7 +352,7 @@ export class Sim {
       if (this.hives[a].pollTip()) { this.say(`${a.toUpperCase()} HIVE TIP (${this.hives[a].tips})`); this.owed[a].push({ at: this.simTime + 2 }); }
     }
     this.humanPlayers();
-    for (const r of per) { r.v.aimTurret(); r.v.intake(r.inp.intake ?? 'all'); if (r.active) { r.v.shoot(r.inp); r.v.place(r.inp); } }
+    for (const r of per) { r.v.aimTurret(); r.v.intake(r.active && r.inp.intakeHeld !== undefined && !r.inp.intakeHeld ? 'none' : (r.inp.intake ?? 'all')); if (r.active) { r.v.shoot(r.inp); r.v.place(r.inp); } }
     this.housekeeping(); this.touch();
   }
 
@@ -351,7 +360,7 @@ export class Sim {
     const v = this.robot.linvel(), a = this.axes();
     const vel = { vf: v.x * a.fwd.x + v.z * a.fwd.z, vl: v.x * a.left.x + v.z * a.left.z, w: this.robot.angvel().y };
     const out = mecanumForces(this.cfg, inp, vel); this.lastForward = inp.forward;
-    this.robots[this.me].lastCmd = { forward: inp.forward, strafeRight: inp.strafeRight, turnRight: inp.turnRight };
+    this.robots[this.me].lastCmd = { ...inp };
     // Rolling and scrub resistance, opposing the direction of travel.
     const sp = Math.hypot(v.x, v.z), rr = this.cfg.rollingResistance * this.cfg.mass * 9.81;
     const c = this.cfg.viscousLoss, k = this.cfg.halfWheelbase + this.cfg.halfTrack;
@@ -397,15 +406,27 @@ export class Sim {
   private intake(filter: IntakeFilter) {
     const c = this.cfg; if (this.carried.length >= c.capacity || filter === 'none') return;
     const opp: BallKind = this.alliance === 'red' ? 'nectar_blue' : 'nectar_red';
+    // intakeHeld is only set by human input. AI always uses undefined (see NO_INPUT).
+    const humanDriven = (this.robots[this.me].lastCmd as Inputs).intakeHeld !== undefined;
     for (const b of this.balls.values()) {
       if (this.carried.length >= c.capacity) break;
-      const p = b.body.translation(); if (p.y > 0.13 || b.retryAt > this.simTime || b.kind === opp) continue; // G408
+      const p = b.body.translation(); if (p.y > 0.13 || b.retryAt > this.simTime) continue;
+      const isOppNectar = b.kind === opp;
+      // AI obeys G408 and never picks up opponent nectar; human can but gets a penalty
+      if (isOppNectar && !humanDriven) continue;
       if ((filter === 'pollen' && b.kind !== 'pollen') || (filter === 'own_nectar' && b.kind === 'pollen')) continue;
       const r = this.toRobot(p.x, p.z);
-      // A dual-sided intake has the same box on the rear face.
       const ahead = c.intake.dualSided ? Math.abs(r.f) : r.f;
       if (ahead < c.length / 2 - 0.01 || ahead > c.length / 2 + c.intake.reach + b.radius || Math.abs(r.l) > c.intake.width / 2) continue;
-      if (this.rng.bernoulli(c.intake.successP)) { this.carried.push(b.kind); this.remove(b); }
+      if (this.rng.bernoulli(c.intake.successP)) {
+        this.carried.push(b.kind); this.remove(b);
+        if (isOppNectar) {
+          // G408: minor foul — 5 points to the opponent alliance
+          const oppAlliance = this.alliance === 'red' ? 'blue' : 'red';
+          this.foulPoints[oppAlliance] = (this.foulPoints[oppAlliance] ?? 0) + 5;
+          this.say(`G408: MINOR FOUL — picked up opponent NECTAR (+5 pts to ${oppAlliance.toUpperCase()})`);
+        }
+      }
       else b.retryAt = this.simTime + c.intake.retrySec;
     }
     // POLLEN can also be removed from the bottom of a FLOWER (G418.B).
@@ -442,20 +463,60 @@ export class Sim {
     const s = this.cfg.shooter; return !!s.turret && ((s.turretRangeDeg ?? 360) < 360 || Number.isFinite(s.turretSlewDegPerSec ?? Infinity));
   }
 
+  /** True for any turret robot — turretAngle is always tracked, whether limited or full 360. */
+  get hasTurret(): boolean { return !!this.cfg.shooter.turret; }
+
   /** Gets the direction that the shooter's mount faces, in radians: the robot's heading, turned 180° for a rear shooter. */
   mountHeading(heading = this.heading): number { return heading + (this.cfg.shooter.facing === 'rear' ? Math.PI : 0); }
 
   /**
    * Turns a limited turret toward the raised CELL's mouth by at most its slew rate for one step, within its range of
    * motion. A turret with less than a full turn of range can't pass its stops, so it takes the long way around.
+   * If the current robot's input has turretLeft or turretRight set, manual control overrides auto-aim.
    */
   private aimTurret() {
-    if (!this.turretLimited) return;
-    const s = this.cfg.shooter, st = this.robots[this.me], half = ((s.turretRangeDeg ?? 360) * Math.PI) / 360, wrap = (a: number) => Math.atan2(Math.sin(a), Math.cos(a));
+    if (!this.hasTurret) return;
+    const s = this.cfg.shooter, st = this.robots[this.me];
+    const wrap = (a: number) => Math.atan2(Math.sin(a), Math.cos(a));
+    // For a manual 360° turret: turretAngle stores robot-relative offset (0 = facing same as robot front).
+    // Arrow right turns the turret clockwise (negative in math convention) = subtract from angle.
+    const isFullManual = !this.turretLimited;
+    const MANUAL_SLEW = ((180 * Math.PI) / 180) * DT; // 180 °/s for manual rotation — one full turn in 2 s
+
+    if (!Number.isFinite(st.turretAngle)) {
+      if (isFullManual) {
+        // Start pointing straight forward (robot-relative offset = 0)
+        st.turretAngle = 0;
+      } else {
+        // Limited: initialise aimed at the HIVE mouth (mount-relative)
+        const half = ((s.turretRangeDeg ?? 360) * Math.PI) / 360;
+        st.turretAngle = Math.max(-half, Math.min(half, wrap(this.turretHeading() - this.mountHeading())));
+      }
+      return;
+    }
+
+    const inp = this.robots[this.me].lastCmd as Inputs;
+    if (inp.turretLeft || inp.turretRight) {
+      // Right arrow = clockwise = subtract; left arrow = counterclockwise = add
+      const dir = (inp.turretLeft ? 1 : 0) - (inp.turretRight ? 1 : 0);
+      if (isFullManual) {
+        st.turretAngle = wrap(st.turretAngle + dir * MANUAL_SLEW);
+      } else {
+        const half = ((s.turretRangeDeg ?? 360) * Math.PI) / 360;
+        const step = (((s.turretSlewDegPerSec ?? 720) * Math.PI) / 180) * DT;
+        st.turretAngle = Math.max(-half, Math.min(half, st.turretAngle + dir * step));
+      }
+      return;
+    }
+
+    // Auto-aim: only for limited turrets (full 360 holds last manual position)
+    if (isFullManual) return;
+    const half = ((s.turretRangeDeg ?? 360) * Math.PI) / 360;
+    const step = (((s.turretSlewDegPerSec ?? 720) * Math.PI) / 180) * DT;
     const want = Math.max(-half, Math.min(half, wrap(this.turretHeading() - this.mountHeading())));
-    if (!Number.isFinite(st.turretAngle)) { st.turretAngle = want; return; } // Aimed before the MATCH starts.
-    const step = (((s.turretSlewDegPerSec ?? Infinity) * Math.PI) / 180) * DT, d = half >= Math.PI ? wrap(want - st.turretAngle) : want - st.turretAngle;
-    st.turretAngle += Math.max(-step, Math.min(step, d)); if (half >= Math.PI) st.turretAngle = wrap(st.turretAngle);
+    const d = half >= Math.PI ? wrap(want - st.turretAngle) : want - st.turretAngle;
+    st.turretAngle += Math.max(-step, Math.min(step, d));
+    if (half >= Math.PI) st.turretAngle = wrap(st.turretAngle);
   }
 
   /**
@@ -463,14 +524,21 @@ export class Sim {
    * always count as aimed: the robot's heading aims the one, and the other aims at once.
    */
   turretAimed(tolRad = 0.02): boolean {
-    if (!this.turretLimited) return true;
+    if (!this.hasTurret) return true;
+    if (!this.turretLimited) return true; // Full 360 turret: always considered aimed (manual control)
     const d = this.mountHeading() + this.robots[this.me].turretAngle - this.turretHeading();
     return Math.abs(Math.atan2(Math.sin(d), Math.cos(d))) < tolRad;
   }
 
   /** Gets where a launch goes now, as a heading in radians before launch error: a turret's aim, or the shooter's facing. */
   private launchAim(pose?: { x: number; z: number; heading: number }): number {
-    if (this.cfg.shooter.turret) return this.turretLimited && !pose ? this.mountHeading() + this.robots[this.me].turretAngle : this.turretHeading(pose);
+    if (this.cfg.shooter.turret) {
+      const st = this.robots[this.me];
+      // turretAngle is robot-relative (offset from mountHeading).
+      // When NaN (not yet initialised by a step), fall back to turretHeading so previewShot works before the match.
+      if (!pose && Number.isFinite(st.turretAngle)) return this.mountHeading() + st.turretAngle;
+      return this.turretHeading(pose);
+    }
     return (pose?.heading ?? this.heading) + (this.launchesRear(pose) ? Math.PI : 0);
   }
 
@@ -632,8 +700,7 @@ export class Sim {
   previewShot(kind: 'pollen' | 'nectar', pose?: { x: number; z: number; heading: number }): { points: number[][]; scores: boolean } {
     const lp = kind === 'pollen' ? this.cfg.shooter.pollen : this.cfg.shooter.nectar, r = kind === 'pollen' ? FIELD.pollenRadius : FIELD.nectarRadius;
     const m = kind === 'pollen' ? BALL.pollenMass : BALL.nectarMass, el = (lp.elevationDeg.mean * Math.PI) / 180, speed = lp.speed.mean;
-    // The launch direction is the robot heading, or the opposite direction for a rear-facing shooter, or a turret's aim.
-    // A pose is a hypothetical spot, where a turret would have had time to aim. Without one, a limited turret aims where it points now.
+    // For preview: turret always shows where it's currently pointing (launchAim uses held turretAngle).
     const th = this.launchAim(pose), base = pose ?? { x: this.robot.translation().x, z: this.robot.translation().z };
     const o = { x: base.x + Math.cos(th) * lp.offset[0], z: base.z - Math.sin(th) * lp.offset[0] };
     const rv = pose ? { x: 0, y: 0, z: 0 } : this.robot.linvel();

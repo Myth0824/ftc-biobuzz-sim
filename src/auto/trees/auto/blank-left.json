@@ -1,0 +1,19 @@
+{
+ "kind": "bt.tree",
+ "id": "blank-left",
+ "name": "Blank plan (left start)",
+ "env": "onboard",
+ "description": "An empty plan for the left start position. Add reference points and steps to build your own AUTO.",
+ "meta": {
+  "start": "left"
+ },
+ "defs": {
+  "len": "bots.me.dimensions.length",
+  "startPos": "pose(field.half - len / 2 - 0.09, 0.33, 180)"
+ },
+ "root": {
+  "sequence": {
+   "children": []
+  }
+ }
+}

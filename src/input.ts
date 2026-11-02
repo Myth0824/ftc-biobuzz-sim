@@ -1,8 +1,94 @@
 import type { Inputs } from './sim/world';
 
+// ---------- configurable key bindings ----------
+export interface KeyBindings {
+  forward: string; back: string; strafeLeft: string; strafeRight: string;
+  turnLeft: string; turnRight: string;
+  shoot: string; intake: string; placeFlower: string;
+  turretLeft: string; turretRight: string;
+}
+
+export const DEFAULT_BINDINGS: KeyBindings = {
+  forward: 'KeyW', back: 'KeyS', strafeLeft: 'KeyA', strafeRight: 'KeyD',
+  turnLeft: 'KeyQ', turnRight: 'KeyE',
+  shoot: 'ArrowUp', intake: 'ArrowDown', placeFlower: 'KeyZ',
+  turretLeft: 'ArrowLeft', turretRight: 'ArrowRight',
+};
+
+const BINDING_KEY = 'biobuzz.keybindings.v1';
+
+export function loadBindings(): KeyBindings {
+  try {
+    const saved = JSON.parse(localStorage.getItem(BINDING_KEY) ?? '{}');
+    return { ...DEFAULT_BINDINGS, ...saved };
+  } catch { return { ...DEFAULT_BINDINGS }; }
+}
+
+export function saveBindings(b: KeyBindings) {
+  try { localStorage.setItem(BINDING_KEY, JSON.stringify(b)); } catch { /* storage is a convenience */ }
+}
+
+/** Human-readable labels for each binding action. */
+export const BINDING_LABELS: Record<keyof KeyBindings, string> = {
+  forward: 'Drive forward', back: 'Drive back',
+  strafeLeft: 'Strafe left', strafeRight: 'Strafe right',
+  turnLeft: 'Turn left', turnRight: 'Turn right',
+  shoot: 'Shoot', intake: 'Intake',
+  placeFlower: 'Place in FLOWER',
+  turretLeft: 'Turret left', turretRight: 'Turret right',
+};
+
+/** Converts a KeyboardEvent.code to a short readable label. */
+export function codeLabel(code: string): string {
+  return code
+    .replace('Key', '').replace('Arrow', '↑↓←→'.includes(code.replace('Arrow', '')) ? '' : '')
+    .replace('ArrowUp', '↑').replace('ArrowDown', '↓')
+    .replace('ArrowLeft', '←').replace('ArrowRight', '→')
+    .replace('Digit', '').replace('Numpad', 'Num').replace('Space', 'Space')
+    .replace('ShiftLeft', 'L-Shift').replace('ShiftRight', 'R-Shift')
+    .replace('ControlLeft', 'L-Ctrl').replace('ControlRight', 'R-Ctrl')
+    .replace('AltLeft', 'L-Alt').replace('AltRight', 'R-Alt')
+    || code;
+}
+
+// Live bindings — updated by the config panel, used immediately
+let bindings = loadBindings();
+export function getBindings() { return bindings; }
+export function setBindings(b: KeyBindings) { bindings = b; saveBindings(b); }
+
+// ---------- one-shot keys (cleared each frame) ----------
 const pressed = new Set<string>();
-// Keys typed in a text field or a list go to that field, not to the app.
-addEventListener('keydown', e => { if (!e.repeat && !(e.target as HTMLElement | null)?.closest?.('input:not([type=range]), select, textarea')) pressed.add(e.code); });
+addEventListener('keydown', e => { if (!e.repeat && !(e.target as HTMLElement | null)?.closest?.('input:not([type=range]), select, textarea, [contenteditable]')) pressed.add(e.code); });
+
+// ---------- held keys (for smooth driving) ----------
+const held = new Set<string>();
+addEventListener('keydown', e => { if (!(e.target as HTMLElement | null)?.closest?.('input:not([type=range]), select, textarea, [contenteditable]')) held.add(e.code); });
+addEventListener('keyup', e => held.delete(e.code));
+// Always release all keys when window loses focus to prevent stuck keys
+addEventListener('blur', () => held.clear());
+
+export function keyboardInputs(): Inputs {
+  const b = bindings;
+  return {
+    forward:     (held.has(b.forward)     ? 1 : 0) - (held.has(b.back)       ? 1 : 0),
+    strafeRight: (held.has(b.strafeRight) ? 1 : 0) - (held.has(b.strafeLeft) ? 1 : 0),
+    turnRight:   (held.has(b.turnRight)   ? 1 : 0) - (held.has(b.turnLeft)   ? 1 : 0),
+    shootPollen: held.has(b.shoot),
+    shootNectar: held.has(b.shoot),
+    placePollen: held.has(b.placeFlower),
+    placeNectar: held.has(b.placeFlower),
+    turretLeft:  held.has(b.turretLeft),
+    turretRight: held.has(b.turretRight),
+    intakeHeld:  held.has(b.intake),
+  };
+}
+
+export function keyboardActive(): boolean {
+  const b = bindings;
+  return held.has(b.forward) || held.has(b.back) || held.has(b.strafeLeft) || held.has(b.strafeRight) ||
+         held.has(b.turnLeft) || held.has(b.turnRight) || held.has(b.shoot) || held.has(b.intake) ||
+         held.has(b.placeFlower) || held.has(b.turretLeft) || held.has(b.turretRight);
+}
 
 const shape = (v: number) => { const d = 0.08, a = Math.abs(v); return a < d ? 0 : Math.sign(v) * ((a - d) / (1 - d)) ** 2; };
 const clamp = (v: number) => Math.max(-1, Math.min(1, v));
@@ -11,29 +97,48 @@ const startWas: boolean[] = [], viewWas: boolean[] = [];
 /** One controller's state. `id` is the name that the browser reports for it. */
 export interface PadState { inputs: Inputs; id: string }
 export interface Frame {
-  /** Controller 1 and controller 2: the first two connected gamepads in the browser's order. Null means not connected. */
-  pads: [PadState | null, PadState | null];
+  /** The single connected gamepad, or null if none connected. */
+  pad: PadState | null;
+  /** Keyboard driving inputs (always present, zero when no keys held). */
+  keyboard: Inputs;
   start: boolean; reset: boolean; camera: boolean; mark: boolean; review: boolean;
-  /** The control bar keys: play or pause, and the previous and next mark. */
   play: boolean; prev: boolean; next: boolean;
+  /** Camera pan/zoom while paused. */
+  camUp: boolean; camDown: boolean;
 }
 
-/**
- * Reads the first two connected gamepads (standard mapping) and the app keys. Robots are driven only with controllers.
- * Left stick: forward/back and strafe. Right stick X: turn. LB: shoot NECTAR. RB: shoot POLLEN. LT: place POLLEN in a
- * FLOWER. RT: place NECTAR in a FLOWER. Start on either controller starts the MATCH, and View cycles the camera.
- * Keys: Enter starts, R resets, C cycles the camera, M marks a moment, V opens the review, Space plays or pauses, and
- * the left and right arrows go to the previous and the next mark.
- */
 export function readInput(): Frame {
+  const b = bindings;
+  // App-level keys — only fire when turret/timeline arrows are NOT the same key as prev/next
+  const turretKeys = new Set([b.turretLeft, b.turretRight]);
   let start = pressed.has('Enter'), camera = pressed.has('KeyC');
-  const reset = pressed.has('KeyR'), mark = pressed.has('KeyM'), review = pressed.has('KeyV'), play = pressed.has('Space'), prev = pressed.has('ArrowLeft'), next = pressed.has('ArrowRight'); pressed.clear();
-  const connected = [...navigator.getGamepads()].filter((g): g is Gamepad => !!g && g.connected).slice(0, 2);
-  const pads = [0, 1].map(i => {
-    const pad = connected[i]; if (!pad) return null; const b = (n: number) => (pad.buttons[n]?.value ?? 0) > 0.4;
-    if (b(9) && !startWas[i]) start = true; startWas[i] = b(9);
-    if (b(8) && !viewWas[i]) camera = true; viewWas[i] = b(8);
-    return { id: pad.id, inputs: { forward: clamp(shape(-pad.axes[1])), strafeRight: clamp(shape(pad.axes[0])), turnRight: clamp(shape(pad.axes[2]) * 0.85), shootNectar: b(4), shootPollen: b(5), placePollen: b(6), placeNectar: b(7) } };
-  }) as [PadState | null, PadState | null];
-  return { pads, start, reset, camera, mark, review, play, prev, next };
+  const reset = pressed.has('KeyR'), mark = pressed.has('KeyM'), review = pressed.has('KeyV'),
+        play = pressed.has('Space'),
+        prev = pressed.has('ArrowLeft') && !turretKeys.has('ArrowLeft'),
+        next = pressed.has('ArrowRight') && !turretKeys.has('ArrowRight');
+  pressed.clear();
+
+  // Single controller: only the first connected gamepad
+  const connected = [...navigator.getGamepads()].filter((g): g is Gamepad => !!g && g.connected);
+  const raw = connected[0] ?? null;
+  let pad: PadState | null = null;
+  if (raw) {
+    const btn = (n: number) => (raw.buttons[n]?.value ?? 0) > 0.4;
+    if (btn(9) && !startWas[0]) start = true; startWas[0] = btn(9);
+    if (btn(8) && !viewWas[0]) camera = true; viewWas[0] = btn(8);
+    pad = {
+      id: raw.id,
+      inputs: {
+        forward:     clamp(shape(-raw.axes[1])),
+        strafeRight: clamp(shape(raw.axes[0])),
+        turnRight:   clamp(shape(raw.axes[2]) * 0.85),
+        shootNectar: btn(4), shootPollen: btn(5),
+        placePollen: btn(6), placeNectar: btn(7),
+        turretLeft:  btn(14), turretRight: btn(15),
+        intakeHeld:  (raw.axes[6] ?? 0) > 0.3 || btn(4), // LT axis or LB button
+      },
+    };
+  }
+
+  return { pad, keyboard: keyboardInputs(), start, reset, camera, mark, review, play, prev, next, camUp: pressed.has('ArrowUp'), camDown: pressed.has('ArrowDown') };
 }

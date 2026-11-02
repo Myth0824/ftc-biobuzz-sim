@@ -28,7 +28,7 @@ describe('completion', () => {
     expect(completeAt('len + fl', 8, exprContext(AUTO_REGISTRY, 'onboard', def))!.from).toBe(6);
   });
   it('offers the fields of a path after a dot, including a pose definition and the FIELD constants', () => {
-    expect(labels('bots.me.')).toEqual(['dimensions', 'slot', 'drive', 'transfer', 'shooter', 'vision']);
+    expect(labels('bots.me.')).toEqual(['dimensions', 'slot', 'drive', 'transfer', 'shooter', 'turret', 'vision']);
     expect(labels('bots.me.dimensions.le')).toEqual(['length', 'width']);
     expect(labels('park.')).toEqual(['x', 'y', 'headingDeg']);
     expect(labels('field.')).toEqual(expect.arrayContaining(['half', 'flowerHalfSize', 'hiveX', 'flowerNear', 'flowerFar']));

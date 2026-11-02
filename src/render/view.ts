@@ -20,6 +20,9 @@ function along(p: Pose2[], f: number): Pose2 | null {
   return { x: a.x + (b.x - a.x) * u, z: a.z + (b.z - a.z) * u, heading: a.heading + dh * u };
 }
 
+/** Clamp helper */
+const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
+
 /** Draws the simulation with three.js. The official field CAD supplies every FIELD element mesh. */
 export class View {
   renderer: THREE.WebGLRenderer; scene = new THREE.Scene(); camera = new THREE.PerspectiveCamera(58, 1, 0.05, 40);
@@ -42,6 +45,17 @@ export class View {
   private arc: THREE.Line; private arcMat = new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.85 });
   private staticKey = ''; private chaseAngle: number | null = null;
 
+  // ---------- free-look orbit state (used during review) ----------
+  /** Whether free-look mode is active (overrides the normal camera modes). */
+  freeLook = false;
+  private fl = {
+    theta: Math.PI * 0.35,   // horizontal angle around Y axis
+    phi: Math.PI * 0.28,     // vertical angle from top (0=top, PI=bottom)
+    radius: 5.5,             // distance from target
+    target: new THREE.Vector3(0, 0.3, 0), // look-at point
+  };
+  private _pointer = { x: 0, y: 0, btn: -1 };
+
   constructor(canvas: HTMLCanvasElement, private onProgress: (msg: string | null) => void) {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
     this.renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
@@ -55,6 +69,7 @@ export class View {
     this.arc = new THREE.Line(new THREE.BufferGeometry(), this.arcMat); this.arc.frustumCulled = false; this.pathLine.frustumCulled = false; this.autoLine.frustumCulled = false; this.scene.add(this.arc, this.pathLine, this.autoLine, this.autoPoses);
     this.loadField(); this.loadBalls();
     addEventListener('resize', () => this.resize()); this.resize();
+    this.attachFreeLook(canvas);
   }
 
   private resize() { const w = innerWidth, h = innerHeight; this.renderer.setSize(w, h, false); this.camera.aspect = w / h; this.camera.updateProjectionMatrix(); }
@@ -393,6 +408,82 @@ export class View {
 
   cycleCamera() { this.mode = CAMERAS[(CAMERAS.indexOf(this.mode) + 1) % CAMERAS.length]; }
 
+  /** Enters free-look mode, snapping the orbit state to match the current camera position. */
+  enterFreeLook() {
+    this.freeLook = true;
+    // Snap orbit state from current camera so entry is seamless
+    const d = this.fl.target.clone().sub(this.camera.position);
+    this.fl.radius = this.camera.position.distanceTo(this.fl.target);
+    this.fl.phi   = Math.acos(clamp((this.camera.position.y - this.fl.target.y) / this.fl.radius, -1, 1));
+    this.fl.theta = Math.atan2(this.camera.position.x - this.fl.target.x, this.camera.position.z - this.fl.target.z);
+  }
+
+  exitFreeLook() { this.freeLook = false; }
+
+  private attachFreeLook(canvas: HTMLCanvasElement) {
+    const p = this._pointer;
+    canvas.addEventListener('pointerdown', e => {
+      if (!this.freeLook) return;
+      p.x = e.clientX; p.y = e.clientY; p.btn = e.button;
+      canvas.setPointerCapture(e.pointerId);
+      e.preventDefault();
+    });
+    canvas.addEventListener('pointermove', e => {
+      if (!this.freeLook || p.btn < 0) return;
+      const dx = e.clientX - p.x, dy = e.clientY - p.y;
+      p.x = e.clientX; p.y = e.clientY;
+      if (p.btn === 0) {
+        // Left drag: orbit
+        this.fl.theta -= dx * 0.007;
+        this.fl.phi    = clamp(this.fl.phi + dy * 0.007, 0.05, Math.PI - 0.05);
+      } else if (p.btn === 2) {
+        // Right drag: pan the target in camera-local XZ
+        const panSpeed = this.fl.radius * 0.0012;
+        const right = new THREE.Vector3(); right.crossVectors(
+          new THREE.Vector3(Math.sin(this.fl.theta) * Math.sin(this.fl.phi), 0, Math.cos(this.fl.theta) * Math.sin(this.fl.phi)),
+          new THREE.Vector3(0, 1, 0)).normalize();
+        const up2d = new THREE.Vector3(0, 0, 0);
+        // Pan along screen right and screen up (projected to XZ for ground-locked pan)
+        this.fl.target.addScaledVector(right, -dx * panSpeed);
+        this.fl.target.y = clamp(this.fl.target.y - dy * panSpeed * 0.5, -0.5, 2.5);
+        this.fl.target.x = clamp(this.fl.target.x, -4, 4);
+        this.fl.target.z = clamp(this.fl.target.z, -4, 4);
+      }
+    });
+    canvas.addEventListener('pointerup',   () => { p.btn = -1; });
+    canvas.addEventListener('pointercancel', () => { p.btn = -1; });
+    canvas.addEventListener('wheel', e => {
+      if (!this.freeLook) return;
+      e.preventDefault();
+      this.fl.radius = clamp(this.fl.radius * (1 + e.deltaY * 0.001), 0.4, 14);
+    }, { passive: false });
+    // Block right-click context menu on canvas during free-look
+    canvas.addEventListener('contextmenu', e => { if (this.freeLook) e.preventDefault(); });
+  }
+
+  /** Adjusts camera while paused (arrow keys). In free-look: pan target. Otherwise: overhead pan + zoom. */
+  adjustView(key: string) {
+    if (this.freeLook) {
+      const PAN = 0.18;
+      if (key === 'ArrowLeft')  this.fl.target.x -= PAN;
+      if (key === 'ArrowRight') this.fl.target.x += PAN;
+      if (key === 'ArrowUp')    this.fl.target.z -= PAN;
+      if (key === 'ArrowDown')  this.fl.target.z += PAN;
+      this.fl.target.x = clamp(this.fl.target.x, -4, 4);
+      this.fl.target.z = clamp(this.fl.target.z, -4, 4);
+      return;
+    }
+    if (this.mode === 'overhead') {
+      const PAN = 0.3;
+      if (key === 'ArrowLeft')  this.camera.position.x -= PAN;
+      if (key === 'ArrowRight') this.camera.position.x += PAN;
+    }
+    // Zoom in/out via FOV for non-free-look modes
+    if (key === 'ArrowUp')   this.camera.fov = Math.max(10, this.camera.fov - 3);
+    if (key === 'ArrowDown') this.camera.fov = Math.min(90, this.camera.fov + 3);
+    this.camera.updateProjectionMatrix();
+  }
+
   sync(sim: Sim, previewKind: 'pollen' | 'nectar' | null, path: { x: number; z: number }[] | null = null) {
     this.pathLine.visible = !!path && path.length > 1;
     if (path && path.length > 1) this.pathLine.geometry.setAttribute('position', new THREE.Float32BufferAttribute(path.flatMap(q => [q.x, 0.012, q.z]), 3));
@@ -426,6 +517,20 @@ export class View {
     } else this.arc.visible = false;
 
     const side = sim.alliance === 'red' ? -1 : 1;
+    // Free-look orbit mode: overrides all normal camera modes
+    if (this.freeLook) {
+      const f = this.fl;
+      const x = f.target.x + f.radius * Math.sin(f.phi) * Math.sin(f.theta);
+      const y = f.target.y + f.radius * Math.cos(f.phi);
+      const z = f.target.z + f.radius * Math.sin(f.phi) * Math.cos(f.theta);
+      this.camera.fov = 58;
+      this.camera.position.set(x, y, z);
+      this.camera.up.set(0, 1, 0);
+      this.camera.lookAt(f.target);
+      this.camera.updateProjectionMatrix();
+      this.renderer.render(this.scene, this.camera);
+      return;
+    }
     if (this.mode === 'driver') { this.camera.fov = 52; this.camera.position.set(side * 3.5, 1.68, side * -0.6); this.camera.lookAt(side * -0.2, 0.3, 0); }
     else if (this.mode === 'overhead') {
       this.camera.fov = 40; this.camera.position.set(0, 6.4, 0.001); this.camera.up.set(side < 0 ? 1 : -1, 0, 0); this.camera.lookAt(0, 0, 0);

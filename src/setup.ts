@@ -1,7 +1,12 @@
 import { fmtMass, fmtSize, fmtSpeed, type Units } from './units';
 import { DEFAULT_ROBOT, setDriveRpm, setMass, setSquareSize, type RobotConfig, type ShooterType } from './sim/config';
 
-export type DriverKind = 'planner' | 'pad1' | 'pad2';
+export type DriverKind = 'planner' | 'pad1' | 'keyboard';
+
+/** The main robot is always R0, always driven by the human, always team 32294. */
+export const MAIN_ROBOT_PLATE = '32294';
+export const MAIN_ROBOT_INDEX = 0;
+
 /** Everything that a team sets for one robot before a MATCH. The robot config popup edits it. */
 export interface BotSetup {
   /** The number plate text, for example a team number. */ plate: string;
@@ -40,7 +45,7 @@ const IN = 0.0254, LB = 0.45359237, KEY = 'biobuzz.bots.v2';
 export const DEFAULT_SETUP = { driveRpm: 600, sizeIn: 15, massLb: 22 };
 /** The reference launcher's errors, from `DEFAULT_ROBOT.shooter.pollen`. The 1x, 3x, and 5x chips in the robot config multiply them. */
 export const REF_ERR = { errElevDeg: DEFAULT_ROBOT.shooter.pollen.elevationDeg.std, errAzimDeg: DEFAULT_ROBOT.shooter.pollen.yawStdDeg, errSpeed: DEFAULT_ROBOT.shooter.pollen.speed.std };
-export const defaultBot = (i: number): BotSetup => ({ plate: BOT_IDS[i], driver: 'planner', stickFrame: 'field', shooter: 'dual', auto: 'default', flowerStartSec: 0, dualIntake: false, dualShooter: false, defense: 'none', ...REF_ERR, intakeP: DEFAULT_ROBOT.intake.successP, ...DEFAULT_SETUP });
+export const defaultBot = (i: number): BotSetup => ({ plate: i === MAIN_ROBOT_INDEX ? MAIN_ROBOT_PLATE : BOT_IDS[i], driver: i === MAIN_ROBOT_INDEX ? 'pad1' : 'planner', stickFrame: 'field', shooter: 'dual', auto: 'default', flowerStartSec: 0, dualIntake: false, dualShooter: false, defense: 'none', ...REF_ERR, intakeP: DEFAULT_ROBOT.intake.successP, ...DEFAULT_SETUP });
 
 /**
  * The robot that the simulator opens with: the combined build that the experiments point to. It is a four-element
@@ -80,16 +85,18 @@ export function sanitize(b: BotSetup, i: number): BotSetup {
   const { spreadX: old, ...rest } = b as BotSetup & { spreadX?: number }; b = rest;
   if (old) b = { ...b, errElevDeg: REF_ERR.errElevDeg * old, errAzimDeg: REF_ERR.errAzimDeg * old, errSpeed: REF_ERR.errSpeed * old };
   const num = (v: number, lo: number, hi: number, d: number) => (Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : d);
-  return { ...b, auto: RENAMED[b.auto] ?? b.auto, plate: (b.plate || BOT_IDS[i]).trim().slice(0, 6) || BOT_IDS[i], driver: i < 2 ? b.driver : 'planner', driveRpm: Math.round(num(b.driveRpm, 100, 1200, DEFAULT_SETUP.driveRpm)), sizeIn: Math.round(num(b.sizeIn, 10, 18, DEFAULT_SETUP.sizeIn) * 10) / 10, massLb: Math.round(num(b.massLb, 10, 42, DEFAULT_SETUP.massLb) * 10) / 10,
+  return { ...b, auto: RENAMED[b.auto] ?? b.auto, plate: i === MAIN_ROBOT_INDEX ? MAIN_ROBOT_PLATE : (b.plate || BOT_IDS[i]).trim().slice(0, 6) || BOT_IDS[i], driver: i === MAIN_ROBOT_INDEX ? (b.driver === 'planner' ? 'pad1' : b.driver) : 'planner',
+    // Main robot is always: front intake only, full 360 turret
+    ...(i === MAIN_ROBOT_INDEX ? { dualIntake: false, turret: true, turretRangeDeg: 360, turretSlewDegPerSec: null } : {}), driveRpm: Math.round(num(b.driveRpm, 100, 1200, DEFAULT_SETUP.driveRpm)), sizeIn: Math.round(num(b.sizeIn, 10, 18, DEFAULT_SETUP.sizeIn) * 10) / 10, massLb: Math.round(num(b.massLb, 10, 42, DEFAULT_SETUP.massLb) * 10) / 10,
     errElevDeg: Math.round(num(b.errElevDeg, 0, 15, REF_ERR.errElevDeg) * 100) / 100, errAzimDeg: Math.round(num(b.errAzimDeg, 0, 15, REF_ERR.errAzimDeg) * 100) / 100, errSpeed: Math.round(num(b.errSpeed, 0, 1.5, REF_ERR.errSpeed) * 1000) / 1000,
     intakeP: Math.round(num(b.intakeP, 0.2, 1, DEFAULT_ROBOT.intake.successP) * 100) / 100,
     turretRangeDeg: Math.round(num(b.turretRangeDeg ?? 360, 30, 360, 360)), turretSlewDegPerSec: b.turretSlewDegPerSec && b.turretSlewDegPerSec > 0 ? Math.round(num(b.turretSlewDegPerSec, 10, 3600, 360)) : null };
 }
 
-/** Assigns a driver to robot `i`. A controller drives one robot, so the robot that had it goes back to the planner. */
+/** Assigns a driver to robot `i`. Only the main robot (R0) can have a human driver. */
 export function assignDriver(bots: BotSetup[], i: number, driver: DriverKind) {
-  if (driver !== 'planner') bots.forEach((b, k) => { if (k !== i && b.driver === driver) b.driver = 'planner'; });
-  bots[i].driver = i < 2 ? driver : 'planner';
+  if (i !== MAIN_ROBOT_INDEX) { bots[i].driver = 'planner'; return; }
+  bots[i].driver = driver === 'planner' ? 'pad1' : driver; // R0 must always have a human driver
 }
 
 /** Builds the simulator's robot configuration from a setup. */
@@ -105,7 +112,7 @@ function phrases(b: BotSetup, units: Units) {
   const turret = (b.turretRangeDeg ?? 360) < 360 || b.turretSlewDegPerSec ? ` ${b.turretRangeDeg ?? 360}°${b.turretSlewDegPerSec ? `, ${b.turretSlewDegPerSec}°/s` : ''}` : '';
   const errored = b.errElevDeg !== REF_ERR.errElevDeg || b.errAzimDeg !== REF_ERR.errAzimDeg || b.errSpeed !== REF_ERR.errSpeed;
   return {
-    driver: b.driver === 'planner' ? 'Planner' : `Controller ${b.driver === 'pad1' ? 1 : 2}, ${b.stickFrame}-centric`,
+    driver: b.driver === 'planner' ? 'Planner' : b.driver === 'keyboard' ? 'Keyboard (WASD)' : 'Controller',
     shooter: b.shooter, auto: `AUTO ${b.auto.replace(/[_-]/g, ' ')}`, teleop: b.flowerStartSec ? `FLOWERS from ${b.flowerStartSec} s` : 'tips only',
     rpm: `${b.driveRpm} rpm`, size: fmtSize(b.sizeIn, units), mass: fmtMass(b.massLb, units), intake: b.dualIntake ? 'dual intake' : '',
     ends: b.turret ? `turret${turret}` : b.dualShooter ? 'launches from both ends' : '', defense: b.defense !== 'none' ? `${b.defense} defense` : '',

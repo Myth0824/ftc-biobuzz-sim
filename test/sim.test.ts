@@ -60,17 +60,20 @@ describe('shooting and HIVE TIP', () => {
     expect(s.stash.red).toBe(4); // The HUMAN PLAYER entered one NECTAR after the TIP.
     expect(s.score('red').teleopTips).toBe(20);
   });
-  it('aims a turret at the raised CELL whatever the robot heading, where a fixed shooter needs the heading', () => {
+  it('a manual full-360 turret holds its angle while the robot turns, and previewShot shows auto-aim', () => {
     const turret = () => { const c = structuredClone(DEFAULT_ROBOT); c.shooter.turret = true; return c; };
     const t = new Sim(RAPIER, undefined, 'practice', 7, { configFor: turret }), f = new Sim(RAPIER, undefined, 'practice', 7);
     const y = t.robot.translation().y, at = { x: HIVE.pivotX.red, y, z: 1.3 };
     const face = (s: Sim, heading: number) => { s.robot.setTranslation(at, true); s.robot.setRotation({ x: 0, y: Math.sin(heading / 2), z: 0, w: Math.cos(heading / 2) }, true); };
-    // Four headings, a quarter turn apart. The fixed rear shooter scores from one of them.
+    // previewShot always shows auto-aim (turretHeading) — scores from any heading before first step
     const scores = (s: Sim) => [0, 1, 2, 3].map(q => { face(s, (q * Math.PI) / 2); return s.previewShot('pollen').scores; });
     expect(scores(t)).toEqual([true, true, true, true]);
     expect(scores(f).filter(Boolean).length).toBe(1);
-    // A real launch with the robot facing the HIVE, where a fixed rear shooter would launch away from it, tips the HIVE.
-    face(t, Math.PI / 2); face(f, Math.PI / 2); expect(f.previewShot('pollen').scores).toBe(false); let shots = 0;
+    // A real launch: aim the turret manually at the HIVE, then shoot
+    face(t, Math.PI / 2);
+    // Set turretAngle to point at HIVE (robot-relative: HIVE is behind the robot facing +Z, so angle = PI)
+    t.robots[0].turretAngle = Math.PI;
+    let shots = 0;
     while (t.hives.red.tips === 0 && shots < 16) { t.carried = ['pollen']; run(t, 0.05, { ...NO_INPUT, shootPollen: true }); run(t, 1.2); shots++; }
     expect(t.hives.red.tips).toBe(1); expect(shots).toBeLessThanOrEqual(6);
   });

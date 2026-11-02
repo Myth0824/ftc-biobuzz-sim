@@ -1,0 +1,19 @@
+{
+ "kind": "bt.tree",
+ "id": "blank-right",
+ "name": "Blank plan (right start)",
+ "env": "onboard",
+ "description": "An empty plan for the right start position. Add reference points and steps to build your own AUTO.",
+ "meta": {
+  "start": "right"
+ },
+ "defs": {
+  "len": "bots.me.dimensions.length",
+  "startPos": "pose(field.half - len / 2 - 0.09, -0.33, 180)"
+ },
+ "root": {
+  "sequence": {
+   "children": []
+  }
+ }
+}
