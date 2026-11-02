@@ -4,8 +4,8 @@ import { AUTO_PROBLEMS, AUTO_TREES, SOLO_AUTO, autoFor, autoStart, previewAuto }
 import { findNode } from './auto/auto-edit';
 import { FieldEditor } from './field-editor';
 import { loadUserTrees } from './user-trees';
-import { BOT_IDS, REF_ERR, MAIN_ROBOT_PLATE, MAIN_ROBOT_INDEX, startSide, assignDriver, defaultBot, metaBot, describe, describeLines, loadBots, robotConfig, sanitize, saveBots, type BotSetup, type DriverKind } from './setup';
-import { loadBindings, saveBindings, setBindings, getBindings, DEFAULT_BINDINGS, BINDING_LABELS, codeLabel, type KeyBindings } from './input';
+import { BOT_IDS, REF_ERR, MAIN_ROBOT_INDEX, startSide, assignDriver, defaultBot, metaBot, describe, describeLines, loadBots, robotConfig, sanitize, saveBots, type BotSetup, type DriverKind } from './setup';
+import { setBindings, getBindings, DEFAULT_BINDINGS, BINDING_LABELS, codeLabel, type KeyBindings } from './input';
 import { MatchAudio } from './audio';
 import { Coach } from './auto/coach';
 import { Referee } from './ref/referee';
@@ -903,14 +903,19 @@ function tick(now: number) {
   if (inF.mark && recorder.trace.frames.length) { const fr = recorder.trace.frames[recorder.trace.frames.length - 1]; review.mark(recorder.trace, fr.t); }
   if (inF.review) { if (review.active) goLive(); else openReview(); }
   if (inF.play) playPause();
-  // Arrow keys: pan/zoom camera when paused; timeline prev/next only when not paused
-  if (livePaused && (inF.prev || inF.next)) {
-    view.adjustView(inF.prev ? 'ArrowLeft' : 'ArrowRight');
+  // The arrows serve three masters, by context: while paused they pan and zoom the camera; in TELEOP with a keyboard
+  // driver they steer the turret (only while the turret is bound to them); otherwise they skip timeline marks.
+  const b = getBindings(), kbTeleop = sim.phase === 'teleop' && bots.some(bot => bot.driver === 'keyboard');
+  const leftTurret = kbTeleop && b.turretLeft === 'ArrowLeft', rightTurret = kbTeleop && b.turretRight === 'ArrowRight';
+  if (livePaused) {
+    if (inF.prev) view.adjustView('ArrowLeft');
+    if (inF.next) view.adjustView('ArrowRight');
+    if (inF.camUp) view.adjustView('ArrowUp');
+    if (inF.camDown) view.adjustView('ArrowDown');
   } else {
-    if (inF.prev) skip(-1); if (inF.next) skip(1);
+    if (inF.prev && !leftTurret) skip(-1);
+    if (inF.next && !rightTurret) skip(1);
   }
-  if (livePaused && inF.camUp)   view.adjustView('ArrowUp');
-  if (livePaused && inF.camDown) view.adjustView('ArrowDown');
   if (sim.phase === 'post' && !traceSaved) { traceSaved = true; void saveTrace(); void countMatch(); }
   if (review.active) { review.tick(frameDt); acc = 0; if (frame++ % 6 === 0) hud(inF.pad); requestAnimationFrame(tick); return; }
   if (startAt && now >= startAt) { startAt = 0; sim.start(); }
@@ -941,8 +946,8 @@ function tick(now: number) {
   const kind = !next ? null : dual ? (me.carried.includes('pollen') ? 'pollen' : 'nectar') : next === 'pollen' ? 'pollen' : 'nectar';
   const paths = pathsSel.value === 'on';
   const showTraj = trajSel.value === 'on';
-  // Show trajectory arc for human drivers whenever trajectory is enabled (not just during match)
-  const previewKind = showTraj && humanNow ? kind : showTraj && bots[fi].driver !== 'planner' && sim.phase === 'pre' ? kind : null;
+  // Show the trajectory arc for a human driver whenever trajectory is enabled, before and during the match.
+  const previewKind = showTraj && humanNow ? kind : null;
   view.sync(me, previewKind, humanNow || !paths ? null : sim.phase === 'auto' ? coaches[fi].auto?.path ?? null : coaches[fi].executor.path);
   // Project the focus robot's AUTO trajectory onto the FIELD before and during AUTO.
   // In the field editor, the plan is the edited robot's, and it redraws after each edit.

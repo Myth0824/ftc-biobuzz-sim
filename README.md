@@ -36,6 +36,9 @@ You need Node.js 20 or later.
 2. To start the dev server, run `npm run dev`.
 3. Open the URL that Vite prints, go to **Simulator**, and then click **Play** in the control bar at the upper left.
 
+To run the simulator as a desktop app instead, run `npm run app`: it starts the dev server on port 5888 and opens the
+simulator page in an Electron window.
+
 | Input | Action |
 | --- | --- |
 | Left stick | Drive and strafe |

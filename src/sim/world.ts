@@ -481,7 +481,7 @@ export class Sim {
     // For a manual 360° turret: turretAngle stores robot-relative offset (0 = facing same as robot front).
     // Arrow right turns the turret clockwise (negative in math convention) = subtract from angle.
     const isFullManual = !this.turretLimited;
-    const MANUAL_SLEW = ((180 * Math.PI) / 180) * DT; // 180 °/s for manual rotation — one full turn in 2 s
+    const MANUAL_SLEW = Math.PI * DT; // 180°/s — one full turn in 2 s
 
     if (!Number.isFinite(st.turretAngle)) {
       if (isFullManual) {

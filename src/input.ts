@@ -39,16 +39,13 @@ export const BINDING_LABELS: Record<keyof KeyBindings, string> = {
 };
 
 /** Converts a KeyboardEvent.code to a short readable label. */
+const CODE_LABELS: Record<string, string> = {
+  ArrowUp: '↑', ArrowDown: '↓', ArrowLeft: '←', ArrowRight: '→',
+  Space: 'Space', ShiftLeft: 'L-Shift', ShiftRight: 'R-Shift',
+  ControlLeft: 'L-Ctrl', ControlRight: 'R-Ctrl', AltLeft: 'L-Alt', AltRight: 'R-Alt',
+};
 export function codeLabel(code: string): string {
-  return code
-    .replace('Key', '').replace('Arrow', '↑↓←→'.includes(code.replace('Arrow', '')) ? '' : '')
-    .replace('ArrowUp', '↑').replace('ArrowDown', '↓')
-    .replace('ArrowLeft', '←').replace('ArrowRight', '→')
-    .replace('Digit', '').replace('Numpad', 'Num').replace('Space', 'Space')
-    .replace('ShiftLeft', 'L-Shift').replace('ShiftRight', 'R-Shift')
-    .replace('ControlLeft', 'L-Ctrl').replace('ControlRight', 'R-Ctrl')
-    .replace('AltLeft', 'L-Alt').replace('AltRight', 'R-Alt')
-    || code;
+  return CODE_LABELS[code] ?? code.replace(/^Key/, '').replace(/^Digit/, '').replace(/^Numpad/, 'Num');
 }
 
 // Live bindings — updated by the config panel, used immediately
@@ -102,20 +99,20 @@ export interface Frame {
   /** Keyboard driving inputs (always present, zero when no keys held). */
   keyboard: Inputs;
   start: boolean; reset: boolean; camera: boolean; mark: boolean; review: boolean;
+  /** Raw arrow keys. While paused the page pans/zooms the camera; otherwise they skip timeline marks, unless the keyboard driver's turret is bound to them. */
   play: boolean; prev: boolean; next: boolean;
-  /** Camera pan/zoom while paused. */
+  /** Raw Up/Down arrow keys; the page zooms the camera with them while paused. */
   camUp: boolean; camDown: boolean;
 }
 
+/** Reads the app-level one-shot keys and the controller. `prev`/`next`/`camUp`/`camDown` are the raw arrow keys; the page decides what they mean (timeline, camera pan, or the turret) from the phase and the bindings. */
 export function readInput(): Frame {
-  const b = bindings;
-  // App-level keys — only fire when turret/timeline arrows are NOT the same key as prev/next
-  const turretKeys = new Set([b.turretLeft, b.turretRight]);
+  // App-level keys
   let start = pressed.has('Enter'), camera = pressed.has('KeyC');
   const reset = pressed.has('KeyR'), mark = pressed.has('KeyM'), review = pressed.has('KeyV'),
         play = pressed.has('Space'),
-        prev = pressed.has('ArrowLeft') && !turretKeys.has('ArrowLeft'),
-        next = pressed.has('ArrowRight') && !turretKeys.has('ArrowRight');
+        prev = pressed.has('ArrowLeft'), next = pressed.has('ArrowRight');
+  const camUp = pressed.has('ArrowUp'), camDown = pressed.has('ArrowDown');
   pressed.clear();
 
   // Single controller: only the first connected gamepad
@@ -140,5 +137,5 @@ export function readInput(): Frame {
     };
   }
 
-  return { pad, keyboard: keyboardInputs(), start, reset, camera, mark, review, play, prev, next, camUp: pressed.has('ArrowUp'), camDown: pressed.has('ArrowDown') };
+  return { pad, keyboard: keyboardInputs(), start, reset, camera, mark, review, play, prev, next, camUp, camDown };
 }
