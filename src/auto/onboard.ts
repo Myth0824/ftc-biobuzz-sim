@@ -122,8 +122,10 @@ interface TurretSubsystem {
   turnLeft(): void;
   /** Commands the turret to turn right (CW) this step. */
   turnRight(): void;
-  /** Releases manual control this step (for limited turrets, auto-aim resumes). */
+  /** Releases manual control this step: auto-aim resumes after the tree's last manual command. */
   release(): void;
+  /** Pins the turret at its current angle this step: it keeps the angle instead of auto-aiming. */
+  hold(): void;
 }
 
 interface DriveSubsystem {
@@ -200,6 +202,7 @@ class OnboardAdapter implements OnboardEnv {
         turnLeft:  () => { out.inputs.turretLeft = true;  out.inputs.turretRight = false; },
         turnRight: () => { out.inputs.turretLeft = false; out.inputs.turretRight = true; },
         release:   () => { out.inputs.turretLeft = false; out.inputs.turretRight = false; },
+        hold:      () => { out.inputs.turretLeft = false; out.inputs.turretRight = false; out.inputs.turretHold = true; },
       },
     } };
   }
@@ -451,10 +454,10 @@ const turretAngle = leaf({
 
 const turretHold = leaf({
   id: 'turret.hold', version: 1, uses: ['turret'],
-  doc: 'Holds the turret at its current robot-relative angle for as long as this leaf runs by releasing manual control each step. For a full-range (360°) turret this freezes the angle. For a limited-range turret, auto-aim resumes when released — use `turret.angle` to set a specific aim instead. Never ends by itself.',
+  doc: 'Pins the turret at its current robot-relative angle for as long as this leaf runs. For any turret, it keeps the angle instead of auto-aiming. Never ends by itself.',
   params: {},
   *run(ctx) {
-    try { for (;;) { ctx.env.bots.me.turret.release(); yield; } }
+    try { for (;;) { ctx.env.bots.me.turret.hold(); yield; } }
     finally { ctx.env.bots.me.turret.release(); }
   },
 });

@@ -60,22 +60,60 @@ describe('shooting and HIVE TIP', () => {
     expect(s.stash.red).toBe(4); // The HUMAN PLAYER entered one NECTAR after the TIP.
     expect(s.score('red').teleopTips).toBe(20);
   });
-  it('a manual full-360 turret holds its angle while the robot turns, and previewShot shows auto-aim', () => {
+  it('a human-aimed full-360 turret keeps its angle until the person turns it', () => {
     const turret = () => { const c = structuredClone(DEFAULT_ROBOT); c.shooter.turret = true; return c; };
-    const t = new Sim(RAPIER, undefined, 'practice', 7, { configFor: turret }), f = new Sim(RAPIER, undefined, 'practice', 7);
+    const t = new Sim(RAPIER, undefined, 'practice', 7, { configFor: turret });
     const y = t.robot.translation().y, at = { x: HIVE.pivotX.red, y, z: 1.3 };
     const face = (s: Sim, heading: number) => { s.robot.setTranslation(at, true); s.robot.setRotation({ x: 0, y: Math.sin(heading / 2), z: 0, w: Math.cos(heading / 2) }, true); };
-    // previewShot always shows auto-aim (turretHeading) — scores from any heading before first step
+    // previewShot always shows auto-aim (turretHeading) — scores from any heading before the match
     const scores = (s: Sim) => [0, 1, 2, 3].map(q => { face(s, (q * Math.PI) / 2); return s.previewShot('pollen').scores; });
     expect(scores(t)).toEqual([true, true, true, true]);
-    expect(scores(f).filter(Boolean).length).toBe(1);
-    // A real launch: aim the turret manually at the HIVE, then shoot
+    // It starts aimed straight ahead, and it stays there with no keys — a person keeps the angle, it doesn't auto-track.
     face(t, Math.PI / 2);
-    // Set turretAngle to point at HIVE (robot-relative: HIVE is behind the robot facing +Z, so angle = PI)
-    t.robots[0].turretAngle = Math.PI;
+    run(t, 1, { ...NO_INPUT, human: true });
+    expect(t.robots[0].turretAngle).toBe(0);
+    // One second of the left key at 180°/s turns it by half a turn; the angle wraps into (−π, π], so −π is what it stores.
+    run(t, 1, { ...NO_INPUT, human: true, turretLeft: true });
+    expect(Math.abs(t.robots[0].turretAngle)).toBeCloseTo(Math.PI, 1);
+    run(t, 1, { ...NO_INPUT, human: true });
+    expect(Math.abs(t.robots[0].turretAngle)).toBeCloseTo(Math.PI, 1);
+    // Aim at the HIVE and shoot: it tips.
     let shots = 0;
-    while (t.hives.red.tips === 0 && shots < 16) { t.carried = ['pollen']; run(t, 0.05, { ...NO_INPUT, shootPollen: true }); run(t, 1.2); shots++; }
+    while (t.hives.red.tips === 0 && shots < 16) { t.carried = ['pollen']; run(t, 0.05, { ...NO_INPUT, human: true, shootPollen: true }); run(t, 1.2); shots++; }
     expect(t.hives.red.tips).toBe(1); expect(shots).toBeLessThanOrEqual(6);
+  });
+  it('a fixed rear shooter scores only with its back to the HIVE', () => {
+    const f = new Sim(RAPIER, undefined, 'practice', 7);
+    const y = f.robot.translation().y, at = { x: HIVE.pivotX.red, y, z: 1.3 };
+    const face = (heading: number) => { f.robot.setTranslation(at, true); f.robot.setRotation({ x: 0, y: Math.sin(heading / 2), z: 0, w: Math.cos(heading / 2) }, true); };
+    const scores = [0, 1, 2, 3].map(q => { face((q * Math.PI) / 2); return f.previewShot('pollen').scores; });
+    expect(scores.filter(Boolean).length).toBe(1);
+  });
+  it('an AUTO turret tracks the raised CELL without being told, and holds fire until it lines up', () => {
+    const turret = () => { const c = structuredClone(DEFAULT_ROBOT); c.shooter.turret = true; return c; };
+    const s = new Sim(RAPIER, undefined, 'practice', 7, { configFor: turret });
+    const y = s.robot.translation().y, at = { x: HIVE.pivotX.red, y, z: 1.3 };
+    s.robot.setTranslation(at, true);
+    s.robot.setRotation({ x: 0, y: Math.sin(Math.PI / 4), z: 0, w: Math.cos(Math.PI / 4) }, true); // nose away from the HIVE
+    run(s, 0.2); // no turret input at all: it swings onto the CELL (instant slew by default)
+    expect(s.turretAimed()).toBe(true);
+    run(s, 1, { ...NO_INPUT, turretRight: true }); // turn the turret a half turn away, as a tree might
+    expect(s.turretAimed()).toBe(false);
+    run(s, 3); // no input: it swings back onto the CELL
+    expect(s.turretAimed()).toBe(true);
+  });
+  it('turret.hold pins the turret instead of auto-aiming', () => {
+    const turret = () => { const c = structuredClone(DEFAULT_ROBOT); c.shooter.turret = true; return c; };
+    const s = new Sim(RAPIER, undefined, 'practice', 7, { configFor: turret });
+    const y = s.robot.translation().y, at = { x: HIVE.pivotX.red, y, z: 1.3 };
+    s.robot.setTranslation(at, true);
+    run(s, 0.2);
+    expect(s.turretAimed()).toBe(true);
+    run(s, 1, { ...NO_INPUT, turretLeft: true });
+    const a = s.robots[0].turretAngle;
+    run(s, 2, { ...NO_INPUT, turretHold: true });
+    expect(s.robots[0].turretAngle).toBe(a);
+    expect(s.turretAimed()).toBe(false);
   });
   it('turns a limited turret at its slew rate and stops it at the end of its range', () => {
     const limited = (rangeDeg: number, slew: number) => () => { const c = structuredClone(DEFAULT_ROBOT); c.shooter.turret = true; c.shooter.turretRangeDeg = rangeDeg; c.shooter.turretSlewDegPerSec = slew; return c; };

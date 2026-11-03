@@ -935,8 +935,8 @@ function tick(now: number) {
     const inAuto = sim.phase === 'auto', inputs: Inputs[] = [], flags: boolean[] = [], drivers: (Coach | null)[] = [];
     bots.forEach((b, i) => {
       if (i >= sim.robots.length) return; // robot not on field for this opponent count
-      const human = !inAuto && b.driver !== 'planner', pad = human ? (b.driver === 'keyboard' ? inF.keyboard : inF.pad?.inputs ?? NO_INPUT) : NO_INPUT;
-      if (human) inputs.push(b.stickFrame === 'field' ? fieldCentric(pad, i) : pad); else inputs.push(inAuto && b.auto === 'none' ? NO_INPUT : coaches[i].update(sim.view(i), DT));
+      const human = !inAuto && b.driver !== 'planner', src = human ? (b.driver === 'keyboard' ? inF.keyboard : inF.pad?.inputs ?? NO_INPUT) : null;
+      if (src) inputs.push({ ...(b.stickFrame === 'field' ? fieldCentric(src, i) : src), human: true }); else inputs.push(inAuto && b.auto === 'none' ? NO_INPUT : coaches[i].update(sim.view(i), DT));
       flags.push(!human); drivers.push(human ? null : coaches[i]);
     });
     sim.step(inputs, flags); referee?.update(sim, DT); recorder.record(sim, drivers, DT); acc -= DT;

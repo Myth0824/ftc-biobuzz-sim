@@ -65,7 +65,9 @@ its number in the scoreboard, click its card in the game setup, or right-click t
   launches from the rear end, from both ends, or from a turret. The turret aims at the raised CELL whatever the
   robot's heading, with full range of motion and an instant slew, so it's an upper bound on what a real turret does.
   On all four robots it adds 39.4 ± 13.6 combined points over 24 seeds (`e79-turret-all`). The popup also sets a
-  turret's range of motion and turn rate: a turret with 180° of range at 180°/s adds 33.9 ± 13.3.
+  turret's range of motion and turn rate: a turret with 180° of range at 180°/s adds 33.9 ± 13.3. A person driving
+  steers the turret with the arrow keys (or the D-pad), and it keeps its angle between presses; the turret aims
+  itself only when a plan or the planner is driving.
 - The launcher's shot-to-shot error as one standard deviation each: elevation, azimuth, and launch speed. Chips fill
   in 1, 3, or 5 times the reference launcher.
 - The intake success probability, the AUTO plan, the TELEOP plan, and the defense policy.

@@ -16,7 +16,7 @@ export interface Flower { id: string; x: number; z: number; stack: BallKind[] }
 /** Driver inputs for one step. Buttons are level-triggered; the sim applies the rate limits. */
 /** Which floor elements the intake accepts. A program sets it per tactic, like a color-sensor sorter. Default: all. */
 export type IntakeFilter = 'all' | 'pollen' | 'own_nectar' | 'none';
-export interface Inputs extends DriveCommand { shootNectar: boolean; shootPollen: boolean; placeNectar: boolean; placePollen: boolean; intake?: IntakeFilter; intakeHeld?: boolean; turretLeft?: boolean; turretRight?: boolean }
+export interface Inputs extends DriveCommand { shootNectar: boolean; shootPollen: boolean; placeNectar: boolean; placePollen: boolean; intake?: IntakeFilter; intakeHeld?: boolean; turretLeft?: boolean; turretRight?: boolean; turretHold?: boolean; human?: boolean }
 export const NO_INPUT: Inputs = { forward: 0, strafeRight: 0, turnRight: 0, shootNectar: false, shootPollen: false, placeNectar: false, placePollen: false, turretLeft: false, turretRight: false };
 
 /** Gets the short code for a ball kind in traces and logs: P, RN, or BN. */
@@ -470,49 +470,38 @@ export class Sim {
   mountHeading(heading = this.heading): number { return heading + (this.cfg.shooter.facing === 'rear' ? Math.PI : 0); }
 
   /**
-   * Turns a limited turret toward the raised CELL's mouth by at most its slew rate for one step, within its range of
-   * motion. A turret with less than a full turn of range can't pass its stops, so it takes the long way around.
-   * If the current robot's input has turretLeft or turretRight set, manual control overrides auto-aim.
+   * Aims the turret for this step. The precedence is: the manual keys for this step win; a human-driven robot and a
+   * tree's `turret.hold` keep the angle they have; otherwise the turret holds the raised CELL, turning toward it at its
+   * slew rate (instant when none is configured). A person pressing the keys keeps the turret where they left it, and an
+   * AUTO tree or the planner doesn't have to aim the turret itself: the turret tracks the CELL by itself.
    */
   private aimTurret() {
     if (!this.hasTurret) return;
     const s = this.cfg.shooter, st = this.robots[this.me];
     const wrap = (a: number) => Math.atan2(Math.sin(a), Math.cos(a));
-    // For a manual 360° turret: turretAngle stores robot-relative offset (0 = facing same as robot front).
-    // Arrow right turns the turret clockwise (negative in math convention) = subtract from angle.
-    const isFullManual = !this.turretLimited;
-    const MANUAL_SLEW = Math.PI * DT; // 180°/s — one full turn in 2 s
-
+    const limited = this.turretLimited;
+    const half = ((s.turretRangeDeg ?? 360) * Math.PI) / 360;
+    const inp = st.lastCmd as Inputs;
     if (!Number.isFinite(st.turretAngle)) {
-      if (isFullManual) {
-        // Start pointing straight forward (robot-relative offset = 0)
-        st.turretAngle = 0;
-      } else {
-        // Limited: initialise aimed at the HIVE mouth (mount-relative)
-        const half = ((s.turretRangeDeg ?? 360) * Math.PI) / 360;
-        st.turretAngle = Math.max(-half, Math.min(half, wrap(this.turretHeading() - this.mountHeading())));
-      }
+      // A person's turret starts straight ahead; an AUTO tree or the planner starts aimed at the CELL, so a full-360
+      // turret doesn't spin from a standing start before its first shot.
+      st.turretAngle = inp.human ? 0 : Math.max(-half, Math.min(half, wrap(this.turretHeading() - this.mountHeading())));
       return;
     }
-
-    const inp = this.robots[this.me].lastCmd as Inputs;
     if (inp.turretLeft || inp.turretRight) {
       // Right arrow = clockwise = subtract; left arrow = counterclockwise = add
       const dir = (inp.turretLeft ? 1 : 0) - (inp.turretRight ? 1 : 0);
-      if (isFullManual) {
-        st.turretAngle = wrap(st.turretAngle + dir * MANUAL_SLEW);
-      } else {
-        const half = ((s.turretRangeDeg ?? 360) * Math.PI) / 360;
-        const step = (((s.turretSlewDegPerSec ?? 720) * Math.PI) / 180) * DT;
-        st.turretAngle = Math.max(-half, Math.min(half, st.turretAngle + dir * step));
-      }
+      const step = limited
+        ? (((s.turretSlewDegPerSec ?? 720) * Math.PI) / 180) * DT
+        : Math.PI * DT; // A free 360° turret turns at 180°/s under manual control.
+      st.turretAngle = limited
+        ? Math.max(-half, Math.min(half, st.turretAngle + dir * step))
+        : wrap(st.turretAngle + dir * step);
       return;
     }
-
-    // Auto-aim: only for limited turrets (full 360 holds last manual position)
-    if (isFullManual) return;
-    const half = ((s.turretRangeDeg ?? 360) * Math.PI) / 360;
-    const step = (((s.turretSlewDegPerSec ?? 720) * Math.PI) / 180) * DT;
+    if (inp.turretHold || inp.human) return; // A person, or a tree's `turret.hold`, keeps the turret where it is.
+    // Otherwise the turret holds the CELL: turn toward the HIVE mouth at the configured slew (instant when none is set).
+    const step = ((s.turretSlewDegPerSec ?? Infinity) * Math.PI * DT) / 180;
     const want = Math.max(-half, Math.min(half, wrap(this.turretHeading() - this.mountHeading())));
     const d = half >= Math.PI ? wrap(want - st.turretAngle) : want - st.turretAngle;
     st.turretAngle += Math.max(-step, Math.min(step, d));
@@ -520,13 +509,16 @@ export class Sim {
   }
 
   /**
-   * Checks whether the shooter points at the raised CELL's mouth, within `tolRad`. A fixed shooter and an ideal turret
-   * always count as aimed: the robot's heading aims the one, and the other aims at once.
+   * Checks whether the shooter points at the raised CELL's mouth, within `tolRad`. A fixed shooter always counts as aimed;
+   * a person driving the turret aims it themselves, and the arc shows where it points; an AUTO tree or the planner has
+   * to wait until the turret points at the CELL. A turret with no angle yet counts as unaligned.
    */
   turretAimed(tolRad = 0.02): boolean {
     if (!this.hasTurret) return true;
-    if (!this.turretLimited) return true; // Full 360 turret: always considered aimed (manual control)
-    const d = this.mountHeading() + this.robots[this.me].turretAngle - this.turretHeading();
+    if (this.robots[this.me].lastCmd.human) return true;
+    const turretAngle = this.robots[this.me].turretAngle;
+    if (!Number.isFinite(turretAngle)) return false;
+    const d = this.mountHeading() + turretAngle - this.turretHeading();
     return Math.abs(Math.atan2(Math.sin(d), Math.cos(d))) < tolRad;
   }
 
