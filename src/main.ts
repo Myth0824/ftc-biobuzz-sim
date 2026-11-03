@@ -223,10 +223,12 @@ canvas.addEventListener('contextmenu', e => {
     if (menuFor && 'step' in menuFor) { abs.textContent = menuFor.ref ? `Make ${menuFor.id} absolute (stop following ${menuFor.ref})` : `${menuFor.id} is already absolute`; abs.disabled = !editor.editing || !menuFor.ref; }
     if (menuFor && !('step' in menuFor)) { del.textContent = `Delete reference point ${menuFor.ref}`; del.disabled = !editor.editing; }
     for (const b of [add, drive, abs, del]) b.title = readOnly;
-    // Keep the menu in the window: near the right or bottom edge it opens to the left of or above the pointer.
+    // Keep the menu in the window: near the right or bottom edge it opens to the left of or above the pointer. In the
+    // editor the bottom edge is the editor bar, so that the menu never hides behind it or the status bar.
+    const floor = editor.active ? $('autoedit').getBoundingClientRect().top : innerHeight;
     const box = menu.getBoundingClientRect();
     if (box.right > innerWidth - 4) menu.style.left = `${Math.max(4, e.clientX - box.width)}px`;
-    if (box.bottom > innerHeight - 4) menu.style.top = `${Math.max(4, e.clientY - box.height)}px`;
+    if (box.bottom > floor - 4) menu.style.top = `${Math.max(4, e.clientY - box.height)}px`;
     return;
   }
   const i = view.pickRobot(e.clientX, e.clientY); if (i !== null) openConfig(i);
@@ -242,7 +244,9 @@ $('aerefcancel').onclick = () => $('aerefname').classList.add('hidden');
 $('aerefadd').onclick = () => { if (!refAt) return; const err = editor.addReferenceAt($<HTMLInputElement>('aerefinput').value, refAt); $('aereferr').textContent = err ?? ''; if (!err) $('aerefname').classList.add('hidden'); };
 for (const ev of ['keydown', 'keyup']) $('aerefinput').addEventListener(ev, e => { e.stopPropagation(); if (ev === 'keydown' && (e as KeyboardEvent).key === 'Enter') $('aerefadd').click(); });
 
-// Load saved settings BEFORE the first reset so the sim is built with the right mode/opponents
+// Load saved settings BEFORE the first reset so the sim is built with the right mode/opponents. The key is declared
+// here, above the call: a `const` read before its declaration throws, and the catch would hide it.
+const SETTINGS_KEY = 'biobuzz.settings.v1';
 loadAllSettings();
 reset();
 // Entering the review saves the trace first, so that annotations always have their trace on disk.
@@ -261,7 +265,6 @@ modeSel.onchange = applySetup; refSel.onchange = applySetup; stageSel.onchange =
 opponentsSel.onchange = () => { try { localStorage.setItem('biobuzz.opponents', opponentsSel.value); } catch { /* ok */ } opponentsSel.blur(); applySetup(); };
 
 // ---------- persistent settings (auto-save to localStorage on every change) ----------
-const SETTINGS_KEY = 'biobuzz.settings.v1';
 
 function saveAllSettings() {
   try {
@@ -287,7 +290,7 @@ function loadAllSettings() {
     if (s.autopaths) pathsSel.value = s.autopaths;
     if (s.showtraj) trajSel.value = s.showtraj;
     if (s.referee) refSel.value = s.referee;
-  } catch { /* storage is a convenience */ }
+  } catch (e) { console.warn('Could not load the saved settings; starting with the defaults.', e); }
 }
 
 // Auto-save whenever any setting changes
@@ -796,6 +799,9 @@ new ResizeObserver(() => paintTree()).observe($('dock'));
 /** Draws the tree view for the chosen robot: live during a match, and at the cursor in the review. */
 function paintTree() {
   const el = $('tree'), on = treeSel.value === 'on' || editor.active; el.classList.toggle('hidden', !on);
+  // The camera keeps the FIELD centered in the strip between the side panels. Outside the editor only the score table
+  // shows, and the match view keeps its framing, so the insets are zero there.
+  const score = $('left');
   if (!editor.active) { view.insetLeft = 0; view.insetRight = 0; }
   if (!on) return;
   const i = treeRobot >= 0 ? treeRobot : focus(), plate = bots[i].plate;
@@ -811,8 +817,9 @@ function paintTree() {
   // The panel fills the space under the control bar and the score, down to the editor bar or the bottom edge.
   el.style.top = `${$('dock').getBoundingClientRect().bottom + 8}px`; el.style.bottom = editor.active ? `${innerHeight - $('autoedit').getBoundingClientRect().top + 8}px` : '12px';
   if (editor.active) {
-    // The overhead view keeps the FIELD clear of this panel, because the rear-side plans run under it.
-    view.insetLeft = el.getBoundingClientRect().right + 8;
+    // Every camera view keeps the FIELD clear of these panels: the tree view and the score on the left, and the
+    // inspector on the right when it shows.
+    view.insetLeft = Math.max(el.getBoundingClientRect().right, score.getBoundingClientRect().right) + 8;
     const insp = $('aeinsp'); view.insetRight = insp.classList.contains('hidden') ? 0 : innerWidth - insp.getBoundingClientRect().left + 8;
     treePanel.paint(`${bots[editor.robot].plate} · AUTO plan`, editor.def, { running: new Set(), last: new Map() }, 'This robot runs no AUTO plan.', editor.treeEdit());
     return;

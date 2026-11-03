@@ -531,16 +531,26 @@ export class View {
       this.renderer.render(this.scene, this.camera);
       return;
     }
-    if (this.mode === 'driver') { this.camera.fov = 52; this.camera.position.set(side * 3.5, 1.68, side * -0.6); this.camera.lookAt(side * -0.2, 0.3, 0); }
+    // The overhead camera rolls to keep the FIELD's long side across the screen; the others stand upright. The up
+    // vector is set before `lookAt`, which consumes it.
+    if (this.mode === 'overhead') this.camera.up.set(side < 0 ? 1 : -1, 0, 0);
+    else this.camera.up.set(0, 1, 0);
+    const at = new THREE.Vector3();
+    if (this.mode === 'driver') { this.camera.fov = 52; this.camera.position.set(side * 3.5, 1.68, side * -0.6); at.set(side * -0.2, 0.3, 0); }
     else if (this.mode === 'overhead') {
-      this.camera.fov = 40; this.camera.position.set(0, 6.4, 0.001); this.camera.up.set(side < 0 ? 1 : -1, 0, 0); this.camera.lookAt(0, 0, 0);
-      // Slide the camera along the screen's horizontal axis by half the difference of the insets, so that the FIELD centers in the uncovered part.
+      this.camera.fov = 40;
+      // With the side panels out (the AUTO editor), lift the camera so the whole FIELD fits the strip between them: the
+      // projected width must fit the strip, and so must the projected height. The fov stays put; the camera height does
+      // the fitting. Outside the editor the insets are zero and this is the plain 6.4 m view.
+      let h = 6.4;
       if (this.insetLeft > 0 || this.insetRight > 0) {
-        const pxPerM = innerHeight / (2 * 6.4 * Math.tan(((this.camera.fov / 2) * Math.PI) / 180)), right = new THREE.Vector3(1, 0, 0).applyQuaternion(this.camera.quaternion);
-        this.camera.position.addScaledVector(right, -(this.insetLeft - this.insetRight) / 2 / pxPerM);
+        const tan = Math.tan((20 * Math.PI) / 180), w = 2 * (FIELD.half + 0.08);
+        h = Math.max(h, (w * innerHeight) / (2 * tan * (innerWidth - this.insetLeft - this.insetRight)), w / (2 * tan));
       }
+      this.camera.position.set(0, h, 0.001);
+      at.set(0, 0, 0);
     }
-    else if (this.mode === 'audience') { this.camera.fov = 50; this.camera.position.set(0, 2.4, 4.4); this.camera.lookAt(0, 0.4, 0); }
+    else if (this.mode === 'audience') { this.camera.fov = 50; this.camera.position.set(0, 2.4, 4.4); at.set(0, 0.4, 0); }
     else {
       // The chase camera orbits the robot so that it always looks toward the robot's own HIVE: it sits on the line from the
       // center of the HIVE through the robot, behind the robot. The robot's heading doesn't matter, because a robot with a
@@ -550,9 +560,17 @@ export class View {
       if (this.chaseAngle === null) this.chaseAngle = want;
       else if (d > 0.4) this.chaseAngle += Math.atan2(Math.sin(want - this.chaseAngle), Math.cos(want - this.chaseAngle)) * 0.08;
       const ux = Math.cos(this.chaseAngle), uz = Math.sin(this.chaseAngle);
-      this.camera.fov = 70; this.camera.position.set(p.x - ux * 1.1, 0.95, p.z - uz * 1.1); this.camera.lookAt(p.x + ux * 0.8, 0.45, p.z + uz * 0.8);
+      this.camera.fov = 70; this.camera.position.set(p.x - ux * 1.1, 0.95, p.z - uz * 1.1); at.set(p.x + ux * 0.8, 0.45, p.z + uz * 0.8);
     }
-    if (this.mode !== 'overhead') this.camera.up.set(0, 1, 0);
+    this.camera.lookAt(at);
+    // Slide the camera along the screen's horizontal axis by half the difference of the side panels' widths, so that
+    // the FIELD centers in the strip between them. The overhead camera looks straight down, so its shift is exact;
+    // for the angled cameras it is close.
+    if (this.insetLeft > 0 || this.insetRight > 0) {
+      const pxPerM = innerHeight / (2 * this.camera.position.distanceTo(at) * Math.tan(((this.camera.fov / 2) * Math.PI) / 180));
+      const right = new THREE.Vector3(1, 0, 0).applyQuaternion(this.camera.quaternion);
+      this.camera.position.addScaledVector(right, -(this.insetLeft - this.insetRight) / 2 / pxPerM);
+    }
     this.camera.updateProjectionMatrix();
     this.renderer.render(this.scene, this.camera);
   }

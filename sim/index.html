@@ -148,6 +148,9 @@
   #statusbar .ok { color: var(--ok); } #statusbar .warn { color: #ffb74d; }
   #statusbar .dot-ok { background: var(--ok); } #statusbar .dot-off { background: #3a3f4a; } #statusbar .dot-kb { background: #4d7dff; }
   body.editing #statusbar { bottom: 54px; }
+  /* The AUTO editor's step panels sit above the status bar, so that no bar clips them. */
+  #stepSettings { position: fixed; right: 12px; bottom: 92px; width: 310px; z-index: 12; font-size: 12px; padding: 10px 12px; }
+  #stepOrder { position: fixed; right: 330px; bottom: 92px; width: 220px; z-index: 12; font-size: 12px; padding: 8px 10px; max-height: calc(100vh - 132px); overflow-y: auto; }
 </style>
 </head>
 <body>
@@ -402,8 +405,8 @@
   <button id="aeedit" title="Lets you drag the poses of this plan.">Edit</button><button id="aecreate" title="Makes a new plan from a copy of any plan for this robot's start position. The new plan becomes this robot's plan.">Create new</button> <label id="aesnaprow" title="Snaps a drag to a 1 in grid and a turn to 5°. Hold Alt, or Option on a Mac, while you drag to do the opposite."><input type="checkbox" id="aesnap"> Snap</label><button id="aeundo" title="Takes back the last edit (Cmd+Z or Ctrl+Z).">Undo</button><button id="aeredo" title="Makes the edit again (Shift+Cmd+Z or Shift+Ctrl+Z).">Redo</button><button id="aereset" title="Moves the selected step's poses back to where the plan that this one was copied from has them.">Reset this step</button><button id="aedelete" title="Deletes this plan. Every robot that ran it goes back to the plan that it was copied from.">Delete plan</button><button id="aehelp" title="How to use the AUTO path editor" style="font-weight:700">?</button><button id="aedone" class="primary">Done</button></div>
 <div id="aehover" class="hidden"></div>
 <div id="aeinsp" class="panel hidden"></div>
-<div id="stepSettings" class="panel hidden" style="position:fixed;right:12px;bottom:78px;width:310px;z-index:5;font-size:12px;padding:10px 12px"></div>
-<div id="stepOrder" class="panel hidden" style="position:fixed;right:330px;bottom:78px;width:220px;z-index:5;font-size:12px;padding:8px 10px;max-height:calc(100vh - 120px);overflow-y:auto"></div>
+<div id="stepSettings" class="panel hidden"></div>
+<div id="stepOrder" class="panel hidden"></div>
 <div id="aemenu" class="panel hidden"><button id="aeaddref">Add reference point here</button><button id="aedrivetoref" class="hidden">Drive to this reference point</button><button id="aeabs"></button><button id="aedelref"></button></div>
 <div id="aerefname" class="panel hidden"><h2>New reference point</h2>
   <label>Name <input id="aerefinput" type="text" maxlength="40" placeholder="For example, rearSpot"></label>
