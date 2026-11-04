@@ -161,10 +161,10 @@ export function readInput(): Frame {
         forward:     clamp(shape(-raw.axes[1])),
         strafeRight: clamp(shape(raw.axes[0])),
         turnRight:   clamp(shape(raw.axes[2]) * 0.85),
-        shootNectar: btn(4), shootPollen: btn(5),
+        shootNectar: btn(5), shootPollen: btn(5),
         placePollen: btn(6), placeNectar: btn(7),
         turretLeft:  btn(14), turretRight: btn(15),
-        intakeHeld:  (raw.axes[6] ?? 0) > 0.3 || btn(4), // LT axis or LB button
+        intakeHeld:  (raw.axes[6] ?? 0) > 0.3 || btn(4), // LT axis or LB button (intake only)
       },
     };
   }
