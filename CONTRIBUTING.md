@@ -9,7 +9,8 @@ You need Node.js 20 or later. Python 3 is needed only to rebuild the Match Lab a
 
 1. To install the dependencies, run `npm install`.
 2. To start the simulator, run `npm run dev`, and open the URL that Vite prints.
-3. To run the tests, run `npm test`. They take about 80 seconds.
+3. To run the tests, run `npm test`. They take about 80 seconds. `npm run test:watch` reruns them as you edit,
+   `npm run check` type-checks, and `npm run preview` serves the production build, with offline mode, at port 4173.
 
 The field model, `public/field.glb`, is in the repository, so you don't need the CAD to run anything. To rebuild it,
 download the official field STEP file to `cad/field-cad-step.step`, and run `node scripts/convert-step.mjs`.
@@ -17,7 +18,7 @@ download the official field STEP file to `cad/field-cad-step.step`, and run `nod
 ## Rules of the code
 
 - **`src/sim/` runs headless.** It has no DOM and no three.js dependency, so that a match runs in Node.js. Rendering
-  lives in `src/render/`, and the page logic in `src/main.ts` and `src/review.ts`.
+  lives in `src/render/`, and the page logic in `src/main.ts`, which boots the page and runs the frame loop, the panels in `src/ui/`, and `src/review.ts`.
 - **Every game constant cites its source.** Field geometry comes from `cad/field-manifest.json`, and rules and points
   from the Competition Manual or the Event Field Setup Guide. Say which, in a comment, when you add one.
 - **Mark assumptions.** If a number isn't measured or published, the comment says `ASSUMPTION`, as the camera range in

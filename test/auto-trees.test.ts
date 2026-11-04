@@ -1,7 +1,7 @@
 import RAPIER from '@dimforge/rapier3d-compat';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { TELEOP_TREES } from '../src/auto/driver';
-import { AUTO_TREES, previewAuto } from '../src/auto/onboard';
+import { AUTO_SOURCES, AUTO_TREES, addAutoTree, previewAuto, removeAutoTree } from '../src/auto/onboard';
 import { Coach } from '../src/auto/coach';
 import { treeStateAt } from '../src/render/tree-view';
 import { notesMarkdown, TraceRecorder } from '../src/trace';
@@ -32,6 +32,21 @@ describe('AUTO trees', () => {
     // A front-facing shooter turns every launch pose around. The first pose is the audience launch spot.
     expect(Math.abs(Math.abs(front[0].heading - big[0].heading) - Math.PI)).toBeLessThan(1e-9);
     expect(small[0].shoots).toBe(true);
+  });
+});
+
+describe('Retired intake leaves', () => {
+  it('loads a saved tree that uses intake.set or intake.filter, as intake.run', () => {
+    const drive = { ref: 'drive.driveTo', params: { pose: 'pose(0, 0, 0)', timeoutSec: 1 } };
+    const par = (intake: object) => ({ parallel: { policy: 'any', children: [drive, intake] } });
+    addAutoTree({ kind: 'bt.tree', id: 'old-intake', name: 'Old intake', env: 'onboard', root: { sequence: { children: [
+      par({ ref: 'intake.set', params: { on: true, filter: 'pollen' } }), par({ ref: 'intake.set', params: { on: false } }), par({ ref: 'intake.filter', params: { filter: 'own_nectar' } }),
+    ] } } });
+    const kids = (AUTO_SOURCES['old-intake'] as unknown as { root: { sequence: { children: { parallel: { children: { ref: string; params: object }[] } }[] } } }).root.sequence.children;
+    expect(kids.map(k => k.parallel.children[1])).toEqual([
+      { ref: 'intake.run', params: { filter: 'pollen' } }, { ref: 'intake.run', params: { filter: 'none' } }, { ref: 'intake.run', params: { filter: 'own_nectar' } },
+    ]);
+    removeAutoTree('old-intake');
   });
 });
 

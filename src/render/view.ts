@@ -1,11 +1,12 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 import { FIELD, HIVE } from '../sim/config';
 import type { RobotConfig } from '../sim/config';
 import { flowerHeights, type BallKind, type Sim } from '../sim/world';
 
 const COLOR: Record<BallKind, number> = { pollen: 0xf2c81e, nectar_red: 0xd8261c, nectar_blue: 0x1f4fd8 };
-export const CAMERAS = ['driver', 'overhead', 'chase', 'audience'] as const;
+export const CAMERAS = ['chase', 'driver', 'overhead', 'audience'] as const;
 export type CameraMode = (typeof CAMERAS)[number];
 /** The distance from a drive handle to its heading knob, in meters. */
 export const KNOB = 0.3;
@@ -20,13 +21,16 @@ function along(p: Pose2[], f: number): Pose2 | null {
   return { x: a.x + (b.x - a.x) * u, z: a.z + (b.z - a.z) * u, heading: a.heading + dh * u };
 }
 
-/** Clamp helper */
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
+const wrap = (a: number) => Math.atan2(Math.sin(a), Math.cos(a));
 
 /** Draws the simulation with three.js. The official field CAD supplies every FIELD element mesh. */
 export class View {
   renderer: THREE.WebGLRenderer; scene = new THREE.Scene(); camera = new THREE.PerspectiveCamera(58, 1, 0.05, 40);
-  mode: CameraMode = 'driver';
+  /** The camera's parent. It stays at the origin on screen; in a headset it is where the viewer stands. */
+  private rig = new THREE.Group();
+  private boardMesh = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 0.6), new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(Object.assign(document.createElement('canvas'), { width: 1024, height: 256 })) }));
+  mode: CameraMode = 'chase';
   /** The number plate text of each robot, in `sim.robots` order. A missing entry shows the alliance letter and the slot. */
   plates: string[] = [];
   /** Pixels at the left edge that a panel covers. The overhead camera centers the FIELD in the rest of the window. */
@@ -35,41 +39,55 @@ export class View {
   insetRight = 0;
   private ballGeo: Record<'pollen' | 'nectar', THREE.BufferGeometry> = { pollen: new THREE.SphereGeometry(FIELD.pollenRadius, 20, 14), nectar: new THREE.SphereGeometry(FIELD.nectarRadius, 20, 14) };
   private ballMat = new Map<BallKind, THREE.Material>();
-  private ballMeshes = new Map<number, THREE.Mesh>();
-  private staticBalls = new THREE.Group();
+  /** The balls on the FIELD and in the FLOWERS, one instanced mesh per kind, so that each kind is one draw call. */
+  private balls = new Map<BallKind, THREE.InstancedMesh>();
+  private ballXf = { m: new THREE.Matrix4(), p: new THREE.Vector3(), q: new THREE.Quaternion(), s: new THREE.Vector3(1, 1, 1) };
   private robotGroups: THREE.Group[] = [];
   private hiveNodes: { red?: THREE.Object3D; blue?: THREE.Object3D } = {};
   private pathLine = new THREE.Line(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({ color: 0x3ab7ff }));
   private autoLine = new THREE.Line(new THREE.BufferGeometry(), new THREE.LineDashedMaterial({ color: 0xffa726, dashSize: 0.08, gapSize: 0.05 }));
   private autoPoses = new THREE.Group(); private autoKey = '';
   private arc: THREE.Line; private arcMat = new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.85 });
-  private staticKey = ''; private chaseAngle: number | null = null;
+  /**
+   * The third-person camera. `yaw` trails the shooter's aim, as a heading in radians. A drag adds `yawOff` and
+   * `pitchOff`, which ease back to zero after the release, and the wheel sets `dist`, in meters.
+   */
+  private chase = { yaw: Number.NaN, yawOff: 0, pitchOff: 0, dist: 1.7, lift: 0, dragging: false, last: 0 };
+  /** Whether the shot preview's arc enters the CELL, or null when no preview is drawn. The driver HUD shows it. */
+  onTarget: boolean | null = null;
+  /** True when the last press on the canvas moved the third-person camera, so its release isn't a click on the FIELD. */
+  dragged = false;
 
-  // ---------- free-look orbit state (used during review) ----------
-  /** Whether free-look mode is active (overrides the normal camera modes). */
+  /** In review, the camera orbits a target: `theta` around the vertical, `phi` down from straight up, at `radius`. */
   freeLook = false;
-  private fl = {
-    theta: Math.PI * 0.35,   // horizontal angle around Y axis
-    phi: Math.PI * 0.28,     // vertical angle from top (0=top, PI=bottom)
-    radius: 5.5,             // distance from target
-    target: new THREE.Vector3(0, 0.3, 0), // look-at point
-  };
+  private fl = { theta: Math.PI * 0.35, phi: Math.PI * 0.28, radius: 5.5, target: new THREE.Vector3(0, 0.3, 0) };
   private _pointer = { x: 0, y: 0, btn: -1 };
 
   constructor(canvas: HTMLCanvasElement, private onProgress: (msg: string | null) => void) {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
     this.renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+    this.renderer.xr.enabled = true;
+    this.rig.add(this.camera); this.boardMesh.visible = false; this.scene.add(this.rig, this.boardMesh);
+    this.renderer.xr.addEventListener('sessionend', () => { this.rig.position.set(0, 0, 0); this.rig.rotation.set(0, 0, 0); this.boardMesh.visible = false; this.boardMesh.userData.key = ''; });
     this.scene.background = new THREE.Color(0x14171c);
     this.scene.add(new THREE.HemisphereLight(0xffffff, 0x30343c, 1.25));
     const sun = new THREE.DirectionalLight(0xffffff, 1.6); sun.position.set(-2, 6, 3); this.scene.add(sun);
     // The balls have holes, so the inside of the far wall shows through: both faces are drawn.
     for (const k of Object.keys(COLOR) as BallKind[]) this.ballMat.set(k, new THREE.MeshStandardMaterial({ color: COLOR[k], roughness: 0.45, side: THREE.DoubleSide }));
     this.buildFloor(); this.buildAxisLabels();
-    this.scene.add(this.staticBalls);
+    for (const k of Object.keys(COLOR) as BallKind[]) this.growBalls(k, 64);
     this.arc = new THREE.Line(new THREE.BufferGeometry(), this.arcMat); this.arc.frustumCulled = false; this.pathLine.frustumCulled = false; this.autoLine.frustumCulled = false; this.scene.add(this.arc, this.pathLine, this.autoLine, this.autoPoses);
     this.loadField(); this.loadBalls();
     addEventListener('resize', () => this.resize()); this.resize();
     this.attachFreeLook(canvas);
+  }
+
+  /** Replaces kind `k`'s instanced mesh with one that holds `capacity` balls. */
+  private growBalls(k: BallKind, capacity: number) {
+    const old = this.balls.get(k); if (old) { this.scene.remove(old); old.dispose(); }
+    const im = new THREE.InstancedMesh(k === 'pollen' ? this.ballGeo.pollen : this.ballGeo.nectar, this.ballMat.get(k)!, capacity);
+    im.instanceMatrix.setUsage(THREE.DynamicDrawUsage); im.frustumCulled = false; im.count = 0;
+    this.balls.set(k, im); this.scene.add(im); return im;
   }
 
   private resize() { const w = innerWidth, h = innerHeight; this.renderer.setSize(w, h, false); this.camera.aspect = w / h; this.camera.updateProjectionMatrix(); }
@@ -87,9 +105,8 @@ export class View {
 
   private loadField() {
     this.onProgress('Loading the field CAD…');
-    new GLTFLoader().load('/field.glb', gltf => {
+    new GLTFLoader().setMeshoptDecoder(MeshoptDecoder).load('/field.glb', gltf => {
       gltf.scene.traverse(o => {
-        if (o.name === 'hive_red') this.hiveNodes.red = o; if (o.name === 'hive_blue') this.hiveNodes.blue = o;
         const m = o as THREE.Mesh;
         if (m.isMesh) {
           if (!m.geometry.getAttribute('normal')) m.geometry.computeVertexNormals();
@@ -98,6 +115,12 @@ export class View {
           if (o.parent?.name === 'perimeter' || o.name === 'perimeter') { const c = mat.color; if (c.r > 0.4 && c.g > 0.4) { mat.transparent = true; mat.opacity = 0.22; mat.depthWrite = false; } }
         }
       });
+      // Each HIVE turns about its pivot. Compression moves the nodes' origins, so each HIVE hangs from a group at its pivot.
+      gltf.scene.updateMatrixWorld(true);
+      for (const side of ['red', 'blue'] as const) {
+        const hive = gltf.scene.getObjectByName(`hive_${side}`); if (!hive) continue;
+        const pivot = new THREE.Group(); pivot.position.set(HIVE.pivotX[side], HIVE.pivotY, 0); hive.parent!.add(pivot); pivot.updateMatrixWorld(); pivot.attach(hive); this.hiveNodes[side] = pivot;
+      }
       this.scene.add(gltf.scene); this.onProgress(null);
     }, e => { if (e.total) this.onProgress(`Loading the field CAD… ${Math.round((100 * e.loaded) / e.total)}%`); },
     () => this.onProgress('The field CAD did not load. Run: node scripts/convert-step.mjs'));
@@ -408,11 +431,48 @@ export class View {
 
   cycleCamera() { this.mode = CAMERAS[(CAMERAS.indexOf(this.mode) + 1) % CAMERAS.length]; }
 
-  /** Enters free-look mode, snapping the orbit state to match the current camera position. */
+  /**
+   * The heading that the third-person camera looks along, in radians, or NaN under any other camera. Field-centric
+   * sticks drive relative to it, so pushing up drives away from the camera.
+   */
+  get chaseYaw(): number { return this.mode === 'chase' && !this.freeLook && !this.vr ? this.chase.yaw + this.chase.yawOff : Number.NaN; }
+
+  /** Runs `fn` once per display frame, in the page or in a headset. A headset session has no window animation frames. */
+  loop(fn: (now: number) => void) { this.renderer.setAnimationLoop(fn); }
+
+  /** Whether a headset shows the FIELD. */
+  get vr() { return this.renderer.xr.isPresenting; }
+
+  /** Starts a headset session: the viewer stands in the alliance area of the focus robot, behind the ALLIANCE wall. */
+  async enterVR() {
+    const xr = (navigator as Navigator & { xr?: XRSystem }).xr; if (!xr) throw new Error('this browser has no WebXR');
+    const session = await xr.requestSession('immersive-vr', { optionalFeatures: ['local-floor', 'bounded-floor'] });
+    this.renderer.xr.setReferenceSpaceType('local-floor'); this.renderer.xr.setFoveation(1);
+    await this.renderer.xr.setSession(session);
+    return session;
+  }
+
+  /** Draws the scoreboard that hangs over the far side of the FIELD in a headset. It redraws only when the text changes. */
+  board(red: number, blue: number, clock: string, phase: string) {
+    const key = `${red}|${blue}|${clock}|${phase}`; if (!this.vr || this.boardMesh.userData.key === key) return; this.boardMesh.userData.key = key;
+    const mat = this.boardMesh.material as THREE.MeshBasicMaterial, cv = mat.map!.image as HTMLCanvasElement, g = cv.getContext('2d')!;
+    g.fillStyle = '#d8261c'; g.fillRect(0, 0, 340, 256); g.fillStyle = '#1f4fd8'; g.fillRect(684, 0, 340, 256); g.fillStyle = '#f4f5f7'; g.fillRect(340, 0, 344, 256);
+    g.textAlign = 'center'; g.textBaseline = 'middle'; g.font = '800 150px "Barlow Condensed", sans-serif'; g.fillStyle = '#fff';
+    g.fillText(String(red), 170, 132); g.fillText(String(blue), 854, 132);
+    g.fillStyle = '#14171c'; g.font = '800 120px "Barlow Condensed", sans-serif'; g.fillText(clock, 512, 92);
+    g.font = '700 58px "Barlow Condensed", sans-serif'; g.fillText(phase.toUpperCase(), 512, 212); mat.map!.needsUpdate = true;
+  }
+
+  /** Puts the headset's origin in the alliance area on `side`, 0.7 m behind the ALLIANCE wall, facing the FIELD, and hangs the scoreboard across from it. */
+  private standAt(side: number) {
+    this.rig.position.set(side * (FIELD.half + 0.7), 0, side * -0.6);
+    this.rig.rotation.y = Math.atan2(this.rig.position.x, this.rig.position.z);
+    this.boardMesh.visible = true; this.boardMesh.position.set(-side * 2.6, 2.1, 0); this.boardMesh.lookAt(this.rig.position.x, 1.6, this.rig.position.z);
+  }
+
+  /** Enters free-look mode from where the camera is, so the view doesn't jump. */
   enterFreeLook() {
     this.freeLook = true;
-    // Snap orbit state from current camera so entry is seamless
-    const d = this.fl.target.clone().sub(this.camera.position);
     this.fl.radius = this.camera.position.distanceTo(this.fl.target);
     this.fl.phi   = Math.acos(clamp((this.camera.position.y - this.fl.target.y) / this.fl.radius, -1, 1));
     this.fl.theta = Math.atan2(this.camera.position.x - this.fl.target.x, this.camera.position.z - this.fl.target.z);
@@ -423,45 +483,50 @@ export class View {
   private attachFreeLook(canvas: HTMLCanvasElement) {
     const p = this._pointer;
     canvas.addEventListener('pointerdown', e => {
-      if (!this.freeLook) return;
+      if (!this.freeLook) {
+        // A left drag looks around the robot in the third-person camera.
+        this.dragged = false;
+        if (this.mode === 'chase' && e.button === 0) { p.x = e.clientX; p.y = e.clientY; p.btn = 0; this.chase.dragging = true; canvas.setPointerCapture(e.pointerId); }
+        return;
+      }
       p.x = e.clientX; p.y = e.clientY; p.btn = e.button;
       canvas.setPointerCapture(e.pointerId);
       e.preventDefault();
     });
     canvas.addEventListener('pointermove', e => {
-      if (!this.freeLook || p.btn < 0) return;
+      if (p.btn < 0) return;
       const dx = e.clientX - p.x, dy = e.clientY - p.y;
       p.x = e.clientX; p.y = e.clientY;
+      if (!this.freeLook) {
+        if (this.chase.dragging) { this.dragged ||= Math.abs(dx) + Math.abs(dy) > 2; this.chase.yawOff = clamp(this.chase.yawOff - dx * 0.006, -Math.PI, Math.PI); this.chase.pitchOff = clamp(this.chase.pitchOff + dy * 0.004, -0.3, 0.8); }
+        return;
+      }
       if (p.btn === 0) {
-        // Left drag: orbit
         this.fl.theta -= dx * 0.007;
         this.fl.phi    = clamp(this.fl.phi + dy * 0.007, 0.05, Math.PI - 0.05);
       } else if (p.btn === 2) {
-        // Right drag: pan the target in camera-local XZ
+        // A right drag pans the target: sideways along the screen, and up and down.
         const panSpeed = this.fl.radius * 0.0012;
         const right = new THREE.Vector3(); right.crossVectors(
           new THREE.Vector3(Math.sin(this.fl.theta) * Math.sin(this.fl.phi), 0, Math.cos(this.fl.theta) * Math.sin(this.fl.phi)),
           new THREE.Vector3(0, 1, 0)).normalize();
-        const up2d = new THREE.Vector3(0, 0, 0);
-        // Pan along screen right and screen up (projected to XZ for ground-locked pan)
         this.fl.target.addScaledVector(right, -dx * panSpeed);
         this.fl.target.y = clamp(this.fl.target.y - dy * panSpeed * 0.5, -0.5, 2.5);
         this.fl.target.x = clamp(this.fl.target.x, -4, 4);
         this.fl.target.z = clamp(this.fl.target.z, -4, 4);
       }
     });
-    canvas.addEventListener('pointerup',   () => { p.btn = -1; });
-    canvas.addEventListener('pointercancel', () => { p.btn = -1; });
+    const release = () => { p.btn = -1; this.chase.dragging = false; };
+    canvas.addEventListener('pointerup', release);
+    canvas.addEventListener('pointercancel', release);
     canvas.addEventListener('wheel', e => {
-      if (!this.freeLook) return;
-      e.preventDefault();
-      this.fl.radius = clamp(this.fl.radius * (1 + e.deltaY * 0.001), 0.4, 14);
+      if (this.freeLook) { e.preventDefault(); this.fl.radius = clamp(this.fl.radius * (1 + e.deltaY * 0.001), 0.4, 14); }
+      else if (this.mode === 'chase') { e.preventDefault(); this.chase.dist = clamp(this.chase.dist * (1 + e.deltaY * 0.001), 0.8, 4.5); }
     }, { passive: false });
-    // Block right-click context menu on canvas during free-look
     canvas.addEventListener('contextmenu', e => { if (this.freeLook) e.preventDefault(); });
   }
 
-  /** Adjusts camera while paused (arrow keys). In free-look: pan target. Otherwise: overhead pan + zoom. */
+  /** Moves the camera while paused, by arrow key: free look pans its target, the third-person camera moves in and out, and the others pan (overhead) and zoom. */
   adjustView(key: string) {
     if (this.freeLook) {
       const PAN = 0.18;
@@ -473,18 +538,31 @@ export class View {
       this.fl.target.z = clamp(this.fl.target.z, -4, 4);
       return;
     }
+    if (this.mode === 'chase') {
+      if (key === 'ArrowUp') this.chase.dist = clamp(this.chase.dist - 0.2, 0.8, 4.5);
+      if (key === 'ArrowDown') this.chase.dist = clamp(this.chase.dist + 0.2, 0.8, 4.5);
+      return;
+    }
     if (this.mode === 'overhead') {
       const PAN = 0.3;
       if (key === 'ArrowLeft')  this.camera.position.x -= PAN;
       if (key === 'ArrowRight') this.camera.position.x += PAN;
     }
-    // Zoom in/out via FOV for non-free-look modes
     if (key === 'ArrowUp')   this.camera.fov = Math.max(10, this.camera.fov - 3);
     if (key === 'ArrowDown') this.camera.fov = Math.min(90, this.camera.fov + 3);
     this.camera.updateProjectionMatrix();
   }
 
+  /** Drops the pixel ratio to 1 when frames run slow for 3 s at a higher ratio, as on a laptop's GPU at 2x. */
+  private adapt() {
+    const f = this.frameTime, now = performance.now(), ms = f.last ? Math.min(100, now - f.last) : 16; f.last = now;
+    f.avg += (ms - f.avg) * 0.05; f.slow = f.avg > 24 ? f.slow + ms : 0;
+    if (f.slow > 3000 && this.renderer.getPixelRatio() > 1) { this.renderer.setPixelRatio(1); this.resize(); f.slow = 0; }
+  }
+  private frameTime = { avg: 16, slow: 0, last: 0 };
+
   sync(sim: Sim, previewKind: 'pollen' | 'nectar' | null, path: { x: number; z: number }[] | null = null) {
+    if (!this.vr) this.adapt();
     this.pathLine.visible = !!path && path.length > 1;
     if (path && path.length > 1) this.pathLine.geometry.setAttribute('position', new THREE.Float32BufferAttribute(path.flatMap(q => [q.x, 0.012, q.z]), 3));
     while (this.robotGroups.length < sim.robots.length) this.robotGroups.push(this.buildRobot());
@@ -492,32 +570,32 @@ export class View {
     const p = sim.robot.translation(), th = sim.heading;
     this.stepGhost(performance.now());
 
-    const seen = new Set<number>();
+    const n: Record<BallKind, number> = { pollen: 0, nectar_red: 0, nectar_blue: 0 }, xf = this.ballXf;
+    const put = (k: BallKind) => {
+      let im = this.balls.get(k)!;
+      if (n[k] >= im.instanceMatrix.count) { const prev = im; im = this.growBalls(k, prev.instanceMatrix.count * 2); im.instanceMatrix.array.set(prev.instanceMatrix.array); }
+      im.setMatrixAt(n[k]++, xf.m.compose(xf.p, xf.q, xf.s));
+    };
     for (const b of sim.balls.values()) {
-      let m = this.ballMeshes.get(b.id);
-      if (!m) { m = new THREE.Mesh(b.kind === 'pollen' ? this.ballGeo.pollen : this.ballGeo.nectar, this.ballMat.get(b.kind)); this.ballMeshes.set(b.id, m); this.scene.add(m); }
-      const t = b.body.translation(); m.position.set(t.x, t.y, t.z); seen.add(b.id);
+      const t = b.body.translation(); xf.p.set(t.x, t.y, t.z);
       // The ball turns with its physics body, so its holes roll. A replayed trace has positions only.
-      const q = (b.body as { rotation?: () => { x: number; y: number; z: number; w: number } }).rotation?.(); if (q) m.quaternion.set(q.x, q.y, q.z, q.w);
+      const q = (b.body as { rotation?: () => { x: number; y: number; z: number; w: number } }).rotation?.(); if (q) xf.q.set(q.x, q.y, q.z, q.w); else xf.q.identity();
+      put(b.kind);
     }
-    for (const [id, m] of this.ballMeshes) if (!seen.has(id)) { this.scene.remove(m); this.ballMeshes.delete(id); }
-
-    const key = sim.flowers.map(f => f.stack.join()).join('|');
-    if (key !== this.staticKey) {
-      this.staticKey = key; this.staticBalls.clear();
-      for (const f of sim.flowers) { const hs = flowerHeights(f.stack); f.stack.forEach((k, i) => { const r = k === 'pollen' ? FIELD.pollenRadius : FIELD.nectarRadius; const m = new THREE.Mesh(k === 'pollen' ? this.ballGeo.pollen : this.ballGeo.nectar, this.ballMat.get(k)); m.position.set(f.x, hs[i] + r, f.z); this.staticBalls.add(m); }); }
-    }
+    xf.q.identity();
+    for (const f of sim.flowers) { const hs = flowerHeights(f.stack); f.stack.forEach((k, i) => { xf.p.set(f.x, hs[i] + (k === 'pollen' ? FIELD.pollenRadius : FIELD.nectarRadius), f.z); put(k); }); }
+    for (const [k, im] of this.balls) { im.count = n[k]; im.instanceMatrix.needsUpdate = true; }
     // The CAD poses the red HIVE at -30 degrees and the blue HIVE at +30 degrees.
     if (this.hiveNodes.red) this.hiveNodes.red.rotation.x = sim.hives.red.phi + HIVE.tiltLimit;
     if (this.hiveNodes.blue) this.hiveNodes.blue.rotation.x = sim.hives.blue.phi - HIVE.tiltLimit;
 
     if (previewKind) {
       const pv = sim.previewShot(previewKind); this.arc.visible = true;
-      this.arc.geometry.setAttribute('position', new THREE.Float32BufferAttribute(pv.points.flat(), 3)); this.arcMat.color.set(pv.scores ? 0x41e07f : 0xe8e8e8);
-    } else this.arc.visible = false;
+      this.arc.geometry.setAttribute('position', new THREE.Float32BufferAttribute(pv.points.flat(), 3)); this.arcMat.color.set(pv.scores ? 0x41e07f : 0xe8e8e8); this.onTarget = pv.scores;
+    } else { this.arc.visible = false; this.onTarget = null; }
 
     const side = sim.alliance === 'red' ? -1 : 1;
-    // Free-look orbit mode: overrides all normal camera modes
+    if (this.vr) { this.standAt(side); this.renderer.render(this.scene, this.camera); return; }
     if (this.freeLook) {
       const f = this.fl;
       const x = f.target.x + f.radius * Math.sin(f.phi) * Math.sin(f.theta);
@@ -552,15 +630,17 @@ export class View {
     }
     else if (this.mode === 'audience') { this.camera.fov = 50; this.camera.position.set(0, 2.4, 4.4); at.set(0, 0.4, 0); }
     else {
-      // The chase camera orbits the robot so that it always looks toward the robot's own HIVE: it sits on the line from the
-      // center of the HIVE through the robot, behind the robot. The robot's heading doesn't matter, because a robot with a
-      // rear shooter faces away from the HIVE when it launches, and a robot that launches from both ends has no single
-      // shooter direction. The angle is smoothed, and it holds under the HIVE, where the line is short and turns fast.
-      const hx = HIVE.pivotX[sim.alliance], dx = hx - p.x, dz = -p.z, d = Math.hypot(dx, dz), want = Math.atan2(dz, dx);
-      if (this.chaseAngle === null) this.chaseAngle = want;
-      else if (d > 0.4) this.chaseAngle += Math.atan2(Math.sin(want - this.chaseAngle), Math.cos(want - this.chaseAngle)) * 0.08;
-      const ux = Math.cos(this.chaseAngle), uz = Math.sin(this.chaseAngle);
-      this.camera.fov = 70; this.camera.position.set(p.x - ux * 1.1, 0.95, p.z - uz * 1.1); at.set(p.x + ux * 0.8, 0.45, p.z + uz * 0.8);
+      // The third-person camera sits behind the shooter's aim, so the middle of the screen is where a launch goes: a
+      // turret's angle, or the end that launches. It trails the aim with a time constant of 1/8 s.
+      const c = this.chase, now = performance.now(), dt = c.last ? Math.min(0.1, (now - c.last) / 1000) : 0, aim = sim.aimHeading(); c.last = now;
+      c.yaw = Number.isFinite(c.yaw) ? c.yaw + wrap(aim - c.yaw) * (1 - Math.exp(-8 * dt)) : aim;
+      if (!c.dragging) { const k = Math.exp(-2.5 * dt); c.yawOff *= k; c.pitchOff *= k; }
+      const yaw = c.yaw + c.yawOff, ux = Math.cos(yaw), uz = -Math.sin(yaw), base = 0.42 + c.pitchOff;
+      // Behind the perimeter, the wall and the alliance-area props would hide the robot, so the camera rises over them.
+      const out = Math.max(Math.abs(p.x - ux * c.dist * Math.cos(base)), Math.abs(p.z - uz * c.dist * Math.cos(base))) - FIELD.half;
+      c.lift += (Math.min(0.75, (Math.max(0, out) / c.dist) * 1.5) - c.lift) * (dt ? 1 - Math.exp(-6 * dt) : 1);
+      const pitch = base + c.lift, back = c.dist * Math.cos(pitch);
+      this.camera.fov = 62; this.camera.position.set(p.x - ux * back, 0.25 + c.dist * Math.sin(pitch), p.z - uz * back); const ahead = 1.4 * (1 - c.lift); at.set(p.x + ux * ahead, 0.35, p.z + uz * ahead);
     }
     this.camera.lookAt(at);
     // Slide the camera along the screen's horizontal axis by half the difference of the side panels' widths, so that

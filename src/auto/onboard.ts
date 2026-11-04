@@ -401,34 +401,6 @@ const FNS: Record<string, FnSpec> = {
   offset: { args: [POSE, t.number(), t.number(), t.number()], required: 3, returns: POSE, impl: (p: Pose, dx: number, dy: number, dh?: number) => ({ x: p.x + dx, y: p.y + dy, headingDeg: dh === undefined ? p.headingDeg : p.headingDeg + dh }) },
 };
 
-const intakeSet = leaf({
-  id: 'intake.set', version: 1, uses: ['intake'],
-  doc: 'Turns the intake on or off for as long as this leaf runs. `on: true` runs the intake with the given `filter`; `on: false` stops it. Never ends by itself — run it in a `parallel any` beside the steps that need it.',
-  params: {
-    on: { type: t.boolean(), doc: 'True to run the intake, false to stop it.' },
-    filter: { type: INTAKE, default: 'all', doc: 'Which elements to accept when on is true.' },
-  },
-  *run(ctx) {
-    const e = ctx.env, { on, filter } = ctx.params;
-    try {
-      for (;;) {
-        if (on) e.bots.me.intake.set(filter); else e.bots.me.intake.stop();
-        yield;
-      }
-    } finally { e.bots.me.intake.stop(); }
-  },
-});
-
-const intakeFilter = leaf({
-  id: 'intake.filter', version: 1, uses: ['intake'],
-  doc: 'Runs the intake with the given filter for as long as this leaf runs. Like `intake.run` but with a clearer name. `pollen` only picks up POLLEN; `own_nectar` only picks up your alliance\'s NECTAR; `all` takes everything. Never ends by itself.',
-  params: { filter: { type: INTAKE, doc: 'Which elements the intake accepts: all, pollen, own_nectar, or none.' } },
-  *run(ctx) {
-    try { for (;;) { ctx.env.bots.me.intake.set(ctx.params.filter); yield; } }
-    finally { ctx.env.bots.me.intake.stop(); }
-  },
-});
-
 const turretAngle = leaf({
   id: 'turret.angle', version: 1, uses: ['turret'],
   doc: 'Turns the turret to a robot-relative angle in degrees (0 = mount direction, positive = CCW). Ends when it arrives within 2° or after `timeoutSec`. Has no effect on robots without a turret.',
@@ -464,7 +436,7 @@ const turretHold = leaf({
 
 export const AUTO_REGISTRY: Registry = {
   envs: { onboard: ONBOARD_SCHEMA },
-  leaves: Object.fromEntries([driveTo, followPath, push, intakeRun, intakeSet, intakeFilter, shoot, waitTip, waitUntil, wait, turretAngle, turretHold].map(l => [l.id, l])),
+  leaves: Object.fromEntries([driveTo, followPath, push, intakeRun, shoot, waitTip, waitUntil, wait, turretAngle, turretHold].map(l => [l.id, l])),
   fns: FNS,
 };
 
@@ -489,6 +461,22 @@ export const AUTO_PROBLEMS: Readonly<Record<string, readonly LoadIssue[]>> = pro
 for (const src of AUTO_FILES) builtIn.add(addAutoTree(src, DRAFT_TEMPLATES.has(src)).id);
 
 /**
+ * Rewrites the retired leaves `intake.set` and `intake.filter` as `intake.run`, which does what both did: a tree saved
+ * before they were merged still loads. `intake.set` with `on: false` runs the intake with the filter `none`.
+ */
+function migrateIntake(src: unknown): unknown {
+  if (Array.isArray(src)) return src.map(migrateIntake);
+  if (!src || typeof src !== 'object') return src;
+  const o = Object.fromEntries(Object.entries(src).map(([k, v]) => [k, migrateIntake(v)])) as Record<string, unknown>;
+  if (o.ref === 'intake.filter') o.ref = 'intake.run';
+  if (o.ref === 'intake.set') {
+    const p = (o.params ?? {}) as { on?: unknown; filter?: unknown };
+    o.ref = 'intake.run'; o.params = { filter: p.on === false ? 'none' : p.filter ?? 'all' };
+  }
+  return o;
+}
+
+/**
  * Loads an AUTO tree and adds it to `AUTO_TREES`, or replaces the tree that has its id. The page adds the trees that
  * the field editor saves. A tree with a tree file's id can't replace that file.
  * @param draft If true, adds a tree that has problems too, and records them in `AUTO_PROBLEMS`. If false, throws.
@@ -496,6 +484,7 @@ for (const src of AUTO_FILES) builtIn.add(addAutoTree(src, DRAFT_TEMPLATES.has(s
  *   an object, or names no known environment.
  */
 export function addAutoTree(src: unknown, draft = false): TreeDef {
+  src = migrateIntake(src);
   const r = draft ? checkTree(src, AUTO_REGISTRY) : { def: loadTree(src, AUTO_REGISTRY), issues: [] };
   const def = r.def; if (!def || !def.id) throw new TreeLoadError(r.issues);
   if (builtIn.has(def.id)) throw new Error(`the tree '${def.id}' is built in and can't be replaced`);

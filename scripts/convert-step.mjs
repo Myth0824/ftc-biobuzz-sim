@@ -1,6 +1,9 @@
 // Converts the official BIOBUZZ field STEP file to public/field.glb and
 // writes cad/field-manifest.json (staging positions and part bounding boxes).
 // Run: node scripts/convert-step.mjs   (takes about two minutes)
+// Then compress it, which takes it from 17 MB to 2 MB:
+//   npx @gltf-transform/cli@4.1.1 meshopt --quantization-volume scene public/field.glb public/field.glb
+// Quantization moves each node's origin, so the viewer turns each HIVE about HIVE.pivotX and HIVE.pivotY.
 import fs from 'node:fs';
 import occtFactory from 'occt-import-js';
 import { MeshoptSimplifier } from 'meshoptimizer';
