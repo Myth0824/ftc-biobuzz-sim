@@ -2,7 +2,8 @@
  * The control bar: the timeline, play and pause, the marks, the game setup and help buttons, the score toggle, and the
  * key bindings panel that the help opens.
  */
-import { BINDING_LABELS, DEFAULT_BINDINGS, codeLabel, getBindings, setBindings, type KeyBindings } from '../input';
+import { BINDING_LABELS, DEFAULT_BINDINGS, codeLabel, getBindings, setBindings, type KeyBindings,
+         GAMEPAD_BINDING_LABELS, DEFAULT_GAMEPAD_BINDINGS, padButtonLabel, getGamepadBindings, setGamepadBindings, type GamepadBindings } from '../input';
 import { app, goLive, openReview, running, startMatch, stopMatch } from './app';
 import { $, closeModals, fmt, store, stored, toggleModal } from './dom';
 import { paintTree } from './tree-ui';
@@ -55,6 +56,46 @@ function paintKeyBindings() {
   $('kbtable').querySelectorAll<HTMLTableRowElement>('tr[data-action]').forEach(row => { row.onclick = () => { rebinding = row.dataset.action as keyof KeyBindings; paintKeyBindings(); }; });
 }
 
+// ---- Gamepad bindings ----
+let rebindingPad: keyof GamepadBindings | null = null;
+let padRebindRaf = 0;
+
+function paintGamepadBindings() {
+  const b = getGamepadBindings();
+  $('gbtable').innerHTML = (Object.keys(DEFAULT_GAMEPAD_BINDINGS) as (keyof GamepadBindings)[]).map(action => {
+    const active = rebindingPad === action;
+    return `<tr data-gbaction="${action}"${active ? ' class="on"' : ''}><td>${GAMEPAD_BINDING_LABELS[action]}</td><td><kbd>${active ? 'press a button…' : padButtonLabel(b[action])}</kbd></td></tr>`;
+  }).join('');
+  $('gbtable').querySelectorAll<HTMLTableRowElement>('tr[data-gbaction]').forEach(row => {
+    row.onclick = () => {
+      rebindingPad = row.dataset.gbaction as keyof GamepadBindings;
+      paintGamepadBindings();
+      schedulePadRebindPoll();
+    };
+  });
+}
+
+/** Polls connected gamepads for a newly pressed button while rebinding. */
+function schedulePadRebindPoll() {
+  cancelAnimationFrame(padRebindRaf);
+  if (!rebindingPad) return;
+  padRebindRaf = requestAnimationFrame(() => {
+    if (!rebindingPad) return;
+    const raw = [...navigator.getGamepads()].find(g => !!g && g.connected);
+    if (raw) {
+      for (let i = 0; i < raw.buttons.length; i++) {
+        if ((raw.buttons[i]?.value ?? 0) > 0.4) {
+          setGamepadBindings({ ...getGamepadBindings(), [rebindingPad]: i });
+          rebindingPad = null;
+          paintGamepadBindings();
+          return;
+        }
+      }
+    }
+    schedulePadRebindPoll();
+  });
+}
+
 export function initTransport() {
   /** Binds a control bar button. The button gives up the focus, so that Space and the arrow keys don't press it again. */
   const bind = (id: string, fn: () => void) => { const el = $<HTMLButtonElement>(id); el.onclick = () => { fn(); el.blur(); paintTransport(); }; };
@@ -83,4 +124,8 @@ export function initTransport() {
   }, true);
   $('openkeybinds').onclick = () => { closeModals(); paintKeyBindings(); $('keybinds').classList.remove('hidden'); };
   $('kbreset').onclick = () => { setBindings({ ...DEFAULT_BINDINGS }); paintKeyBindings(); };
+  $('opengbinds').onclick = () => { closeModals(); rebindingPad = null; cancelAnimationFrame(padRebindRaf); paintGamepadBindings(); $('gbinds').classList.remove('hidden'); };
+  $('gbreset').onclick = () => { setGamepadBindings({ ...DEFAULT_GAMEPAD_BINDINGS }); paintGamepadBindings(); };
+  // Cancel pad rebind on Escape
+  addEventListener('keydown', e => { if (e.key === 'Escape' && rebindingPad) { rebindingPad = null; cancelAnimationFrame(padRebindRaf); paintGamepadBindings(); } }, true);
 }

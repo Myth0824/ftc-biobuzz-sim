@@ -105,10 +105,12 @@
     <div class="keys grid">
       <b>Left stick</b><span>Drive and strafe</span>
       <b>Right stick X</b><span>Turn</span>
-      <b>LB</b><span>Shoot NECTAR</span>
-      <b>RB</b><span>Shoot POLLEN</span>
+      <b>LB</b><span>Intake</span>
+      <b>RB</b><span>Shoot (NECTAR &amp; POLLEN)</span>
       <b>LT</b><span>Place POLLEN in FLOWER</span>
       <b>RT</b><span>Place NECTAR in FLOWER</span>
+      <b>D-pad ↑</b><span>Put balls in FLOWER</span>
+      <b>D-pad ↓</b><span>Take balls from FLOWER (drive in)</span>
       <b>D-pad ← →</b><span>Rotate turret left / right</span>
       <b>Start</b><span>Start the MATCH</span>
       <b>View / Select</b><span>Change the camera</span>
@@ -263,13 +265,19 @@
   </div>
   <p class="note"><b>Structure keywords:</b> <code>sequence</code> runs children in order. <code>parallel policy:any</code> runs all children at once and stops when any one finishes: run the intake beside a drive step this way.</p>
 
-  <div class="links"><button id="openkeybinds">Key bindings</button></div>
+  <div class="links"><button id="openkeybinds">Key bindings</button><button id="opengbinds">Controller bindings</button></div>
 </div></div>
 <div id="keybinds" class="modal hidden"><div class="panel" role="dialog" aria-modal="true" aria-labelledby="kbhead">
   <div class="mhead"><h2 id="kbhead">Key bindings</h2><button class="ib" data-close title="Close (Esc)" aria-label="Close"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button></div>
   <p class="note lead">Click a row then press any key to rebind. Changes save instantly.</p>
   <table id="kbtable"></table>
   <div class="btns"><button id="kbreset">Reset to defaults</button></div>
+</div></div>
+<div id="gbinds" class="modal hidden"><div class="panel" role="dialog" aria-modal="true" aria-labelledby="gbhead">
+  <div class="mhead"><h2 id="gbhead">Controller bindings</h2><button class="ib" data-close title="Close (Esc)" aria-label="Close"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button></div>
+  <p class="note lead">Click a row then press the button on your controller to rebind. Changes save instantly.</p>
+  <table id="gbtable"></table>
+  <div class="btns"><button id="gbreset">Reset to defaults</button></div>
 </div></div>
 <div id="toasts" aria-live="polite"></div>
 <div id="statusbar" aria-live="polite"></div>

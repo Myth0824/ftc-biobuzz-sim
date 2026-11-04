@@ -51,6 +51,73 @@ let bindings = loadBindings();
 export function getBindings() { return bindings; }
 export function setBindings(b: KeyBindings) { bindings = b; saveBindings(b); }
 
+// ---------------------------------------------------------------------------
+// Gamepad bindings
+// ---------------------------------------------------------------------------
+
+/** Each action maps to a gamepad button index (0-based, standard mapping). */
+export interface GamepadBindings {
+  shoot: number;
+  intake: number;
+  placePollen: number;
+  placeNectar: number;
+  placeFlowerUp: number;
+  takeFlowerDown: number;
+  turretLeft: number;
+  turretRight: number;
+}
+
+export const DEFAULT_GAMEPAD_BINDINGS: GamepadBindings = {
+  shoot:          5,  // RB
+  intake:         4,  // LB
+  placePollen:    6,  // LT
+  placeNectar:    7,  // RT
+  placeFlowerUp:  12, // D-pad up  → put balls IN flower
+  takeFlowerDown: 13, // D-pad down → take balls OUT of flower (intakeHeld)
+  turretLeft:     14, // D-pad left
+  turretRight:    15, // D-pad right
+};
+
+const GAMEPAD_BINDING_KEY = 'biobuzz.gamepadbindings.v1';
+
+export function loadGamepadBindings(): GamepadBindings {
+  try {
+    const saved = JSON.parse(localStorage.getItem(GAMEPAD_BINDING_KEY) ?? '{}');
+    return { ...DEFAULT_GAMEPAD_BINDINGS, ...saved };
+  } catch { return { ...DEFAULT_GAMEPAD_BINDINGS }; }
+}
+
+export function saveGamepadBindings(b: GamepadBindings) {
+  try { localStorage.setItem(GAMEPAD_BINDING_KEY, JSON.stringify(b)); } catch {}
+}
+
+export const GAMEPAD_BINDING_LABELS: Record<keyof GamepadBindings, string> = {
+  shoot:          'Shoot (nectar & pollen)',
+  intake:         'Intake',
+  placePollen:    'Place POLLEN in FLOWER',
+  placeNectar:    'Place NECTAR in FLOWER',
+  placeFlowerUp:  'D-pad ↑ — Put balls in FLOWER',
+  takeFlowerDown: 'D-pad ↓ — Take balls from FLOWER',
+  turretLeft:     'Turret left',
+  turretRight:    'Turret right',
+};
+
+/** Returns a short human-readable label for a gamepad button index. */
+export function padButtonLabel(n: number): string {
+  const LABELS: Record<number, string> = {
+    0: 'A', 1: 'B', 2: 'X', 3: 'Y',
+    4: 'LB', 5: 'RB', 6: 'LT', 7: 'RT',
+    8: 'View', 9: 'Start/Menu',
+    10: 'L-Stick', 11: 'R-Stick',
+    12: 'D-pad ↑', 13: 'D-pad ↓', 14: 'D-pad ←', 15: 'D-pad →',
+  };
+  return LABELS[n] ?? `Btn ${n}`;
+}
+
+let gamepadBindings = loadGamepadBindings();
+export function getGamepadBindings() { return gamepadBindings; }
+export function setGamepadBindings(b: GamepadBindings) { gamepadBindings = b; saveGamepadBindings(b); }
+
 // Keys pressed since the last frame, for the app's one-shot commands.
 const pressed = new Set<string>();
 addEventListener('keydown', e => { if (!e.repeat && !(e.target as HTMLElement | null)?.closest?.('input:not([type=range]), select, textarea, [contenteditable]')) pressed.add(e.code); });
@@ -152,19 +219,29 @@ export function readInput(): Frame {
   const raw = connected[0] ?? null;
   let pad: PadState | null = null;
   if (raw) {
+    const gb = gamepadBindings;
     const btn = (n: number) => (raw.buttons[n]?.value ?? 0) > 0.4;
     if (btn(9) && !startWas[0]) start = true; startWas[0] = btn(9);
     if (btn(8) && !viewWas[0]) camera = true; viewWas[0] = btn(8);
+
+    // D-pad up: place balls INTO a flower; D-pad down: take balls OUT (intakeHeld while driving into flower)
+    const dpadUp   = btn(gb.placeFlowerUp);
+    const dpadDown = btn(gb.takeFlowerDown);
+
     pad = {
       id: raw.id,
       inputs: {
         forward:     clamp(shape(-raw.axes[1])),
         strafeRight: clamp(shape(raw.axes[0])),
         turnRight:   clamp(shape(raw.axes[2]) * 0.85),
-        shootNectar: btn(5), shootPollen: btn(5),
-        placePollen: btn(6), placeNectar: btn(7),
-        turretLeft:  btn(14), turretRight: btn(15),
-        intakeHeld:  (raw.axes[6] ?? 0) > 0.3 || btn(4), // LT axis or LB button (intake only)
+        shootNectar: btn(gb.shoot),
+        shootPollen: btn(gb.shoot),
+        placePollen: btn(gb.placePollen) || dpadUp,
+        placeNectar: btn(gb.placeNectar) || dpadUp,
+        turretLeft:  btn(gb.turretLeft),
+        turretRight: btn(gb.turretRight),
+        // LT axis (axes[6]) OR the configured intake button OR d-pad down
+        intakeHeld:  (raw.axes[6] ?? 0) > 0.3 || btn(gb.intake) || dpadDown,
       },
     };
   }
