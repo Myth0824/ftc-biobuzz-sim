@@ -36,10 +36,7 @@ You need Node.js 20 or later.
 2. To start the dev server, run `npm run dev`.
 3. Open the URL that Vite prints, go to **Simulator**, and then click **Play** in the control bar at the upper left.
 
-To run the simulator as a desktop app instead, run `npm run app`: it starts the dev server on port 5888 and opens the
-simulator page in an Electron window.
-
-The deployed simulator also installs as an app and works offline, as at an event with no Wi-Fi: in Chrome or Edge on a
+The deployed simulator installs as an app and works offline, as at an event with no Wi-Fi: in Chrome or Edge on a
 computer, or the Meta Quest browser, use **Install** in the address bar or the browser menu. One visit online caches
 it. On a Quest, the headset button in the control bar drives from the alliance area in VR. See
 [docs/simulator.md](docs/simulator.md#platforms).
@@ -78,7 +75,7 @@ The results are in [experiments/](experiments/README.md). Every number on the si
 | `src/auto/` | The planner: the tree files in `trees/auto/` and `trees/teleop/`, their leaves, tactics, path planning, the path follower, and the defense bookkeeping |
 | `src/bt/` | The behavior-tree runtime: coroutines that advance once per physics step. It knows nothing about BIOBUZZ. See [docs/behavior-trees.md](docs/behavior-trees.md). |
 | `src/ref/`, `src/render/` | The PIN referee, and the three.js view |
-| `src/main.ts`, `src/review.ts`, `src/setup.ts` | The simulator page, the review mode, and the robot setups |
+| `src/main.ts`, `src/ui/`, `src/review.ts`, `src/setup.ts` | The simulator page: its boot and frame loop, its panels, the review mode, and the robot setups |
 | `src/field-editor.ts`, `src/user-trees.ts` | The field editor for AUTO poses, and the edited trees that the browser keeps |
 | `index.html`, `sim/index.html` | The home page and the simulator page. Both are Vite entries. |
 | `public/` | The field and ball models, and the built Match Lab and lessons pages |

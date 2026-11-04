@@ -213,7 +213,7 @@ order, and whether the shot preview enters the CELL.
 ### Pedro Pathing import
 
 **Import Pedro Pathing auto** in a red robot's config reads a Pedro Pathing OpMode's `.java` file into a new AUTO
-tree. `src/auto/pedro.ts` evaluates the file's declarations of numbers, `Pose`s, and paths, with no Java compiler. It
+tree. `src/auto/pedro.ts` parses the file with java-parser, which loads only when you import, and evaluates the file's declarations of numbers, `Pose`s, and paths, with no Java compiler. A file that isn't valid Java is refused with the line where it stops parsing. It
 reads Pedro 2.x (`line`, `curve`, `.linear`, `.constant`, `.tangent`, `.reversed`) and Pedro 1.x (`BezierLine`,
 `BezierCurve`, `Point`, `pathBuilder().addPath(...)` and the `set...HeadingInterpolation` calls). The tree drives to the
 OpMode's start pose with the path planner, and then follows each path with `drive.followPath`, in the order that the
@@ -241,8 +241,6 @@ One web page serves every platform, so a fix lands everywhere at once:
 - **Standalone VR** on a Quest 2 or 3, in the Quest browser, through WebXR. See the next section.
 - **PC VR.** Chrome and Edge on Windows run the same WebXR session on a headset tethered by Quest Link, Air Link, or
   SteamVR.
-- **Electron**, `npm run app`, for working on the desktop app. Electron's WebXR support is experimental, so VR goes
-  through a browser instead.
 
 A native build in Unity or Godot would need the physics, the planner, and the behavior trees written again. The Quest
 Store also takes an installed web app, packaged with Meta's PWA tools, if the team wants a store listing later.
@@ -257,7 +255,7 @@ right trigger launches POLLEN and the right grip NECTAR, the left grip places PO
 the turret, and A starts the MATCH, or resets the FIELD after it. A pickup and a launch pulse the controllers.
 
 It is the same page as on a desktop, through WebXR in `src/render/view.ts` (`enterVR`) and `src/input.ts` (`xrPad`),
-so there is nothing to install. An Electron or native build would need a PC tethered by Link, or a port to a game engine.
+so there is nothing to install. A native build would need a port to a game engine.
 WebXR needs a secure page: open the deployed sim in the Quest browser, or for the dev server connect the Quest by USB with
 developer mode on, run `adb reverse tcp:5173 tcp:5173`, and open `http://localhost:5173/sim/` in the headset. On a
 desktop, Meta's Immersive Web Emulator extension stands in for a headset.

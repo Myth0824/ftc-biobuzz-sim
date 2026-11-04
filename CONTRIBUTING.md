@@ -18,7 +18,7 @@ download the official field STEP file to `cad/field-cad-step.step`, and run `nod
 ## Rules of the code
 
 - **`src/sim/` runs headless.** It has no DOM and no three.js dependency, so that a match runs in Node.js. Rendering
-  lives in `src/render/`, and the page logic in `src/main.ts` and `src/review.ts`.
+  lives in `src/render/`, and the page logic in `src/main.ts`, which boots the page and runs the frame loop, the panels in `src/ui/`, and `src/review.ts`.
 - **Every game constant cites its source.** Field geometry comes from `cad/field-manifest.json`, and rules and points
   from the Competition Manual or the Event Field Setup Guide. Say which, in a comment, when you add one.
 - **Mark assumptions.** If a number isn't measured or published, the comment says `ASSUMPTION`, as the camera range in

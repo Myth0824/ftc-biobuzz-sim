@@ -10,10 +10,8 @@
     "url": "https://github.com/caryden/ftc-biobuzz-sim.git"
   },
   "type": "module",
-  "main": "electron/main.cjs",
   "scripts": {
     "dev": "vite",
-    "app": "node electron/start.mjs",
     "build": "tsc --noEmit && vite build && node scripts/migrate-d1.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -30,11 +28,11 @@
     "@codemirror/view": "^6.43.13",
     "@dimforge/rapier3d-compat": "^0.14.0",
     "@lezer/highlight": "^1.2.5",
+    "java-parser": "^3.0.1",
     "three": "^0.169.0"
   },
   "devDependencies": {
     "@types/three": "^0.169.0",
-    "electron": "^45.2.1",
     "meshoptimizer": "^1.2.0",
     "occt-import-js": "^0.0.23",
     "tsx": "^4.23.13",

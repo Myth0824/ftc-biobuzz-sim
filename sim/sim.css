@@ -1,0 +1,199 @@
+/* The simulator page. Colors and type are tokens on :root. */
+:root { --bg: rgba(16,19,24,.86); --line: rgba(255,255,255,.12); --fg: #e9ecf1; --dim: #a3abb7; --red: #ef4a3c; --blue: #4d7dff; --pollen: #f2c81e; --ok: #41e07f;
+  --ui: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; --display: "Barlow Condensed", ui-sans-serif, system-ui, sans-serif; --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace; }
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; overflow: hidden; background: #14171c; color: var(--fg); font: 13px/1.45 var(--ui); }
+canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+.panel { position: fixed; background: var(--bg); border: 1px solid var(--line); border-radius: 10px; backdrop-filter: blur(8px); padding: 10px 12px; }
+/* The scoreboard follows the FTC audience display: alliance blocks, solid score boxes, and a white timer in the middle. */
+#top { top: 12px; left: 50%; transform: translateX(-50%); display: flex; align-items: stretch; padding: 0; overflow: hidden; border-radius: 8px; }
+#top .teams { display: flex; flex-direction: column; justify-content: center; padding: 0 12px; font: 600 12px/1.6 var(--mono); color: #fff; }
+.you { display: inline-block; padding: 0 5px; border-radius: 3px; background: #fff; color: #a3241b; font: 700 10px/16px var(--ui); vertical-align: middle; }
+#top .score { font: 800 44px/1 var(--display); min-width: 96px; display: flex; align-items: center; justify-content: center; color: #fff; font-variant-numeric: tabular-nums; }
+#top .teams.red { background: #a3241b; } #top .score.red { background: var(--red); } #top .teams.blue { background: #1f3f9e; } #top .score.blue { background: var(--blue); }
+#top .mid { background: #f4f5f7; color: #14171c; padding: 5px 16px 4px; min-width: 128px; }
+#clock { font: 800 38px/1 var(--display); text-align: center; font-variant-numeric: tabular-nums; }
+#phase { font: 700 12px/1 var(--display); letter-spacing: .08em; text-transform: uppercase; color: #565d68; text-align: center; margin-top: 3px; }
+h2 { margin: 0 0 6px; font-size: 12px; color: var(--fg); font-weight: 600; }
+table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+/* Score tables put the category in the middle, with red at one side and blue at the other, as FTC match results do. */
+table.ftc td { padding: 2px 4px; text-align: center; color: var(--dim); white-space: nowrap; } table.ftc td.r, table.ftc td.b { width: 50px; font-weight: 700; color: #fff; }
+table.ftc td.r { background: rgba(239,74,60,.30); } table.ftc td.b { background: rgba(77,125,255,.30); }
+table.ftc tr.head td.r { background: var(--red); } table.ftc tr.head td.b { background: var(--blue); } table.ftc tr.head td { font-size: 11px; letter-spacing: .1em; }
+table.ftc tr.total td { border-top: 1px solid var(--line); font-size: 15px; color: #fff; font-weight: 800; } table.ftc tr.total td.r { background: var(--red); } table.ftc tr.total td.b { background: var(--blue); }
+table.ftc tr.rprow td.r, table.ftc tr.rprow td.b { color: var(--ok); } table.ftc tr.sep td { border-top: 1px solid var(--line); }
+#final { top: 50%; left: 50%; transform: translate(-50%,-50%); width: 440px; padding: 0; overflow: hidden; }
+#final { width: 460px; max-width: calc(100vw - 24px); max-height: calc(100vh - 48px); overflow-y: auto; }
+#final .win { padding: 10px; text-align: center; font: 800 26px/1.1 var(--display); letter-spacing: .04em; color: #fff; }
+#final .big { display: flex; } #final .big div { flex: 1; text-align: center; font: 800 72px/1.15 var(--display); color: #fff; font-variant-numeric: tabular-nums; }
+/* The bracket reads left to right: each round is a box, and a won round lights the line into the next one. */
+.bracket { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin: 8px 0 10px; }
+.bracket .rnd { position: relative; display: flex; flex-direction: column; gap: 1px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; font-size: 11px; color: var(--dim); background: rgba(255,255,255,.03); }
+.bracket .rnd + .rnd::before { content: ""; position: absolute; left: -11px; top: 50%; width: 10px; height: 1px; background: var(--line); }
+.bracket .rnd b { color: var(--fg); font: 700 14px/1.1 var(--display); letter-spacing: .02em; }
+.bracket .rnd span:last-child { font-weight: 600; margin-top: 2px; }
+.bracket .rnd.now { border-color: var(--blue); box-shadow: inset 0 0 0 1px var(--blue); } .bracket .rnd.now span:last-child { color: var(--blue); }
+.bracket .rnd.won { border-color: rgba(65,224,127,.6); background: rgba(65,224,127,.1); } .bracket .rnd.won span:last-child { color: var(--ok); } .bracket .rnd.won + .rnd::before { background: var(--ok); }
+.bracket .rnd.lost { border-color: rgba(239,74,60,.7); background: rgba(239,74,60,.12); } .bracket .rnd.lost span:last-child { color: #ff8a80; }
+#tourbox .bracket { grid-template-columns: repeat(2, 1fr); } #tourbox .bracket .rnd::before { display: none; }
+.tourmsg { text-align: center; font: 800 22px/1.15 var(--display); letter-spacing: .02em; margin: 2px 0 0; }
+#final .body { padding: 8px 12px 12px; } #final .btns { display: flex; gap: 8px; margin-top: 8px; } #final .btns button { margin: 0; }
+label { display: flex; justify-content: space-between; align-items: center; margin: 5px 0; color: var(--dim); }
+select, button { background: #232831; color: var(--fg); border: 1px solid var(--line); border-radius: 6px; padding: 5px 9px; font: inherit; transition: background-color .15s ease-out, border-color .15s ease-out; }
+button { cursor: pointer; width: 100%; margin-top: 6px; } button:hover:not(:disabled) { background: #2d333e; } button:disabled, select:disabled { opacity: .5; cursor: default; }
+button.primary { background: var(--ok); color: #0b1a10; border-color: var(--ok); font-weight: 700; } button.primary:hover:not(:disabled) { background: #6be89b; }
+:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; } select:hover:not(:disabled) { border-color: rgba(255,255,255,.25); }
+kbd { font: 600 11px var(--mono); padding: 1px 6px; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; color: var(--dim); }
+textarea { width: 100%; background: #232831; color: var(--fg); border: 1px solid var(--line); border-radius: 6px; padding: 6px; font: 12px/1.35 inherit; resize: vertical; }
+/* The game setup and the help open as modals from the control bar, over a scrim that closes them. */
+.modal { position: fixed; inset: 0; z-index: 8; display: flex; align-items: flex-start; justify-content: center; padding-top: 72px; background: rgba(0,0,0,.35); }
+.modal > .panel { position: relative; width: 300px; max-height: calc(100vh - 88px); overflow: auto; }
+.mhead { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; } .modal h2 { margin-top: 10px; } .modal .mhead h2 { margin: 0; color: var(--fg); }
+#setup > .panel { width: 620px; max-width: calc(100vw - 24px); } .rowhead { display: flex; justify-content: space-between; align-items: center; margin-top: 12px; } .modal .rowhead h2 { margin: 0; } .rowhead button { width: auto; margin: 0; }
+.modal .btns { display: flex; gap: 6px; } #nsaved { color: var(--dim); font-size: 11px; margin-top: 6px; }
+#helpbox > .panel { width: 540px; max-width: calc(100vw - 24px); } .cols { display: flex; flex-wrap: wrap; column-gap: 24px; } .cols > div { flex: 1 1 220px; }
+.keys { color: var(--dim); font-size: 12px; line-height: 1.6; } .keys b { color: var(--fg); font-weight: 600; } .keys.grid { display: grid; grid-template-columns: max-content 1fr; column-gap: 10px; }
+.links { margin-top: 12px; font-size: 12px; } .links a { color: var(--fg); }
+/* Toasts: referee calls, rule messages, and the field position of a click. Each one fades after 4 s. */
+#toasts { position: fixed; bottom: 92px; left: 50%; transform: translateX(-50%); z-index: 9; display: flex; flex-direction: column; align-items: center; gap: 6px; pointer-events: none; }
+#toasts div { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 7px 14px; backdrop-filter: blur(8px); max-width: min(640px, calc(100vw - 32px)); text-align: center; transition: opacity .5s; }
+#toasts div.ref { border-color: #ffb74d; } #toasts div.out { opacity: 0; } body.editing #toasts { bottom: 64px; }
+/* The match card: what comes next, and the button that starts it. */
+#banner { top: 42%; left: 50%; transform: translate(-50%,-50%); text-align: center; padding: 18px 28px 20px; min-width: 320px; max-width: min(520px, calc(100vw - 24px)); }
+#banner b { display: block; font: 800 40px/1.05 var(--display); letter-spacing: .01em; }
+#banner .eyebrow { display: block; color: var(--dim); font: 700 15px/1.2 var(--display); letter-spacing: .04em; margin-bottom: 4px; }
+#banner small { display: block; color: var(--dim); font-size: 13px; margin-top: 6px; }
+#banner .go { display: flex; align-items: center; justify-content: center; gap: 10px; margin-top: 14px; } #banner .go button { width: auto; margin: 0; padding: 9px 20px; font-size: 14px; }
+/* The driver HUD: the carried elements in launch order, and whether the shot preview enters the CELL. */
+#drivehud { right: 16px; bottom: 40px; display: flex; align-items: center; gap: 14px; padding: 8px 12px; }
+#drivehud .slots { display: flex; gap: 6px; } #drivehud .slots i { width: 18px; height: 18px; border-radius: 50%; border: 2px solid rgba(255,255,255,.25); }
+#drivehud .slots i.pollen { background: var(--pollen); border-color: var(--pollen); } #drivehud .slots i.nred { background: #d8261c; border-color: #d8261c; } #drivehud .slots i.nblue { background: #1f4fd8; border-color: #1f4fd8; }
+#drivehud .aim { font: 700 15px/1 var(--display); letter-spacing: .04em; padding: 5px 10px; border-radius: 4px; color: var(--dim); border: 1px solid var(--line); min-width: 92px; text-align: center; }
+#drivehud .aim.on { background: var(--ok); border-color: var(--ok); color: #0b1a10; }
+body.reviewing #drivehud, body.editing #drivehud { display: none !important; }
+/*
+ * The control bar sits in the upper-left corner, with the score table under it. Its timeline covers the whole MATCH:
+ * the recorded part fills in as the MATCH runs, and a drag back opens the review. The thumb and the marks share the
+ * track's 6 px insets, so that a mark lines up with the thumb at its frame.
+ */
+#dock { position: fixed; top: 12px; left: 12px; width: 300px; z-index: 2; display: flex; flex-direction: column; gap: 8px; } #dock > .panel { position: static; }
+#transport { padding: 6px 8px 4px; } .trow { display: flex; align-items: center; } .trow + .trow { justify-content: space-between; margin-top: 2px; }
+#track { position: relative; flex: 1; height: 22px; margin-right: 8px; }
+#trail, #marks { position: absolute; left: 6px; right: 6px; } #trail { top: 9px; height: 4px; border-radius: 2px; background: rgba(255,255,255,.12); }
+#tfill { display: block; width: 0; height: 100%; border-radius: 2px; background: #7e8794; }
+#scrub { position: absolute; inset: 0; width: 100%; height: 22px; margin: 0; background: transparent; -webkit-appearance: none; appearance: none; cursor: pointer; }
+#scrub::-webkit-slider-runnable-track { height: 22px; background: transparent; } #scrub::-moz-range-track { background: transparent; }
+#scrub::-webkit-slider-thumb { -webkit-appearance: none; width: 12px; height: 12px; margin-top: 5px; border: 0; border-radius: 50%; background: var(--fg); }
+#scrub::-moz-range-thumb { width: 12px; height: 12px; border: 0; border-radius: 50%; background: var(--fg); } #scrub:disabled { cursor: default; } #scrub:disabled::-webkit-slider-thumb { background: transparent; }
+#marks { top: 0; height: 22px; pointer-events: none; }
+#marks i { position: absolute; top: 6px; width: 10px; height: 10px; margin-left: -5px; border-radius: 50%; border: 2px solid #14171c; cursor: pointer; pointer-events: auto; }
+#marks i.sys { top: 5px; width: 2px; height: 12px; margin-left: -1px; border: 0; border-radius: 1px; background: #c2c8d2; pointer-events: none; }
+#scrubtime { font: 700 11px var(--mono); white-space: nowrap; }
+#tlive { width: auto; margin: 0 0 0 8px; padding: 1px 8px; border-radius: 999px; font-size: 11px; display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+#tlive i { width: 7px; height: 7px; border-radius: 50%; background: var(--red); } #tlive.behind i { background: var(--dim); }
+button.ib { width: 28px; height: 28px; margin: 0; padding: 0; display: inline-flex; align-items: center; justify-content: center; background: transparent; border-color: transparent; }
+button.ib:hover { background: rgba(255,255,255,.08); } button.ib:disabled { opacity: .35; cursor: default; background: transparent; }
+button.ib svg { width: 18px; height: 18px; } button.ib.big { width: 32px; height: 32px; border-color: var(--line); } button.ib.big svg { width: 20px; height: 20px; }
+#tplay.on .i-play, #tplay:not(.on) .i-pause { display: none; } #tscore svg { transition: transform .15s; } #tscore[aria-expanded="true"] svg { transform: rotate(180deg); }
+.dv { width: 1px; height: 18px; background: var(--line); }
+/*
+ * When the centered scoreboard would reach the control bar, the page adds `narrow` to the body, and the scoreboard and
+ * the banner center in the space right of the bar: (312 px + 12 px) / 2 = 162 px right of the window's center.
+ */
+body.narrow #top, body.narrow #banner { left: calc(50% + 162px); } body.narrow #banner { max-width: calc(100vw - 348px); }
+@media (max-width: 820px) { #top { transform: translateX(-50%) scale(.8); transform-origin: top center; } }
+/* On a phone there is no room beside the control bar: the scoreboard goes to the bottom, and the match card centers. */
+@media (max-width: 640px) {
+  body.narrow #top, body.narrow #banner, #top, #banner { left: 50%; }
+  #top { top: auto; bottom: 34px; transform: translateX(-50%) scale(.72); transform-origin: bottom center; }
+  #banner, body.narrow #banner { min-width: 0; width: calc(100vw - 24px); max-width: none; }
+} #rspeed { width: 56px; padding: 3px 4px; } #rspeed:disabled { opacity: .45; }
+input[type=text] { background: #232831; color: var(--fg); border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; font: inherit; }
+#aenew { top: 84px; left: 50%; transform: translateX(-50%); width: 340px; z-index: 6; } #aenew h2 { color: var(--fg); } #aenew label { gap: 8px; } #aenew input, #aenew select { width: 220px; }
+#aenew .btns { display: flex; gap: 6px; margin-top: 8px; } #aenew .btns button { margin: 0; } #aeerr { color: #ff8a80; font-size: 12px; min-height: 16px; margin-top: 4px; }
+#aestatus { color: var(--dim); font-size: 11px; } #aestatus.warn { color: #ffb74d; }
+#aesnaprow { margin: 0; gap: 4px; white-space: nowrap; color: var(--fg); } #aesnaprow input { margin: 0; }
+#aehover { position: fixed; z-index: 7; pointer-events: none; background: #2a2340; color: #e1bee7; border: 1px solid #7e57c2; border-radius: 4px; padding: 1px 6px; font: 11px var(--mono); }
+#aeinsp { top: 12px; right: 12px; width: 310px; bottom: 70px; overflow-y: auto; z-index: 5; font-size: 12px; padding: 8px 10px; }
+#aeinsp h3 { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--dim); margin: 10px 0 4px; } #aeinsp section:first-child h3 { margin-top: 0; }
+#aeinsp p { margin: 0 0 6px; } #aeinsp code { font: 11.5px var(--mono); }
+#aeinsp input, #aeinsp select { width: 100%; box-sizing: border-box; margin: 2px 0 0; padding: 3px 6px; font-size: 12px; }
+#aeinsp input.mono { font-family: var(--mono); } #aeinsp .bad { border-color: #ff8a80; }
+#aeinsp input:disabled, #aeinsp select:disabled { opacity: .75; }
+#aeinsp .ai-hint, #aeinsp .ai-meta, #aeinsp .ai-doc { color: var(--dim); font-size: 11px; } #aeinsp .ai-doc { margin-top: 2px; }
+#aeinsp .ai-node { font-family: var(--mono); margin-bottom: 4px; } #aeinsp .ai-node b { color: #ffd54f; }
+#aeinsp .ai-field { margin: 8px 0; } #aeinsp .ai-req { color: #ffb74d; font-size: 10.5px; } #aeinsp .ai-ro { padding: 3px 0; color: var(--dim); }
+#aeinsp .ai-err { color: #ff8a80; font-size: 11.5px; margin-top: 2px; }
+#aeinsp .ai-problems { border: 1px solid #ff8a80; border-radius: 8px; padding: 6px 8px; } #aeinsp .ai-problems h3 { color: #ff8a80; }
+#aeinsp .ai-problems ul { margin: 0; padding-left: 16px; } #aeinsp .ai-problems li[data-go] { cursor: pointer; } #aeinsp .ai-problems li[data-go]:hover { text-decoration: underline; }
+#aeinsp .ai-node b.pose::before { content: '●'; color: #b388ff; margin-right: 4px; } #treebody .tv.def .pd { color: #b388ff; margin-right: 4px; }
+#aeinsp button { width: auto; margin: 0; padding: 2px 10px; font-size: 11.5px; } #aeinsp .ai-btns { display: flex; gap: 6px; margin-top: 8px; }
+#treebody .tv.grp b { color: var(--dim); font-weight: 600; } #treebody .tv.const { color: var(--dim); cursor: default; } #treebody .tv.add { cursor: pointer; }
+#treebody .tv.def b { font-weight: 500; }
+.tv.bad { box-shadow: inset 3px 0 #ff8a80; } body.editing #treebody .tv { cursor: pointer; }
+#aemenu { z-index: 7; padding: 4px; } #aemenu button { display: block; margin: 0; width: 100%; text-align: left; white-space: nowrap; } #aemenu button + button { margin-top: 4px; } #aemenu button.hidden { display: none; }
+#aerefname { top: 84px; left: 50%; transform: translateX(-50%); width: 300px; z-index: 7; } #aerefname h2 { color: var(--fg); } #aerefname input { width: 180px; }
+#aerefname .btns { display: flex; gap: 6px; margin-top: 8px; } #aerefname .btns button { margin: 0; } #aereferr { color: #ff8a80; font-size: 12px; min-height: 16px; margin-top: 4px; }
+#notepop { width: 300px; z-index: 5; } #notepop h2 { color: var(--fg); } #notepop .btns { display: flex; gap: 6px; margin-top: 6px; } #notepop .btns button { margin: 0; }
+body.reviewing #botcfg, body.reviewing #banner, body.reviewing #final { display: none !important; }
+body.reviewing canvas { cursor: crosshair; }
+/* The robot cards in the game setup: red in the left column, blue in the right, as the scoreboard has them. A click on a card opens its robot config. */
+#botlist { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: repeat(2, auto); grid-auto-flow: column; gap: 8px; margin-top: 6px; }
+#botlist .bot { border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px 7px; background: rgba(255,255,255,.03); cursor: pointer; }
+#botlist .bot.red { border-color: rgba(239,74,60,.45); } #botlist .bot.blue { border-color: rgba(77,125,255,.5); } #botlist .bot:hover { background: rgba(255,255,255,.07); } body.playing #botlist .bot { cursor: default; }
+.bothead { display: flex; align-items: center; gap: 6px; } .bothead b { min-width: 52px; font: 600 12px var(--mono); padding: 1px 5px; border-radius: 4px; color: #fff; text-align: center; }
+.bothead span:not(.you) { flex: 1; color: var(--dim); font-size: 11px; } .botdesc { margin-top: 5px; font-size: 12px; line-height: 1.45; color: var(--dim); } .botdesc div:first-child { color: var(--fg); }
+@media (max-width: 520px) { #botlist { grid-template-columns: minmax(0, 1fr); grid-template-rows: none; grid-auto-flow: row; } }
+button.gear { width: 22px; height: 22px; margin: 0; padding: 0; line-height: 1; border-radius: 5px; font-size: 14px; display: inline-flex; align-items: center; justify-content: center; } #top .teams div { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin: 1px 0; }
+#top .teams button.gear { background: rgba(0,0,0,.25); border-color: rgba(255,255,255,.25); color: #fff; width: 18px; height: 18px; font-size: 12px; }
+body.playing button.gear { display: none; }
+body.playing.paused button.gear { display: inline-flex; opacity: 0.7; }
+#botcfg { top: 84px; left: 50%; transform: translateX(-50%); width: 300px; z-index: 6; } #botcfg h2 { color: var(--fg); } #botcfg input { width: 120px; } #botcfg select { max-width: 176px; } #botcfg label { gap: 8px; white-space: nowrap; } #botcfg .btns { display: flex; gap: 6px; margin-top: 8px; } #botcfg .btns button { margin: 0; }
+input[type=number] { background: #232831; color: var(--fg); border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; font: inherit; }
+.errhead { display: flex; justify-content: space-between; align-items: center; margin: 8px 0 2px; color: var(--fg); font-size: 12px; } .chips { display: flex; gap: 4px; } .chips button { width: auto; margin: 0; padding: 2px 9px; border-radius: 999px; font-size: 11px; }
+/* The tree view: the chosen robot's behavior tree as an outline. It sits on the left, under the control bar and the score. */
+#tree { left: 12px; width: 360px; display: flex; flex-direction: column; font: 11.5px/1.45 var(--mono); padding: 8px 10px; }
+#treebody { flex: 1; min-height: 0; overflow: auto; }
+#tree h2 { font-family: var(--ui); margin-bottom: 4px; } #treebots { display: flex; gap: 4px; margin-bottom: 6px; }
+#treebots button { width: auto; margin: 0; padding: 1px 7px; font: 700 11px var(--mono); } #treebots button.on { background: var(--fg); color: #14171c; }
+.tv { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--dim); border-radius: 4px; padding-right: 4px; }
+.tv b { color: var(--fg); font-weight: 600; } .tv b.leaf { color: var(--pollen); } .tv i { color: #c2c8d2; font-style: normal; } .tv .d { color: #7e8794; } .tv em { font-style: normal; font-size: 10.5px; }
+.tv.run { background: rgba(65,224,127,.18); } .tv.run em { color: var(--ok); font-weight: 700; }
+.tv.ok em { color: #6fae86; } .tv.fail em { color: #f0857b; } .tv.halt em { color: #8b939f; } .tv.err em, .tv.err b { color: var(--red); }
+.tv-empty { color: var(--dim); }
+/* The field editor: the tree view selects steps, and a bar at the bottom edge shows the selected pose. */
+.tv.chg > b::before { content: "\25CF  "; color: var(--ok); } .tv.chg2 > b::before { content: "\25CB  "; color: #6fae86; }
+.tv.ed { cursor: pointer; } .tv.ed b.leaf::after { content: " \25C9"; color: #ffa726; } .tv.ed:hover { background: rgba(255,255,255,.07); } .tv.sel, .tv.sel:hover { background: rgba(255,167,38,.28); }
+#autoedit { bottom: 10px; left: 12px; right: 12px; display: flex; align-items: center; gap: 10px; padding: 6px 10px; }
+#autoedit button { width: auto; margin: 0; } #autoedit button:disabled { opacity: .45; cursor: default; }
+#autoedit .aeinfo { flex: 1; min-width: 0; } #autoedit .aeinfo > div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#aehead { font-weight: 700; } #aeframe { color: #ff8a80; font-size: 11px; } #aesel { color: var(--dim); font-variant-numeric: tabular-nums; }
+body.editing #banner, body.editing #final { display: none !important; }
+.hidden { display: none !important; }
+/* Persistent controller/keyboard status bar at the bottom of the screen */
+#statusbar { position: fixed; bottom: 0; left: 0; right: 0; z-index: 10; display: flex; gap: 18px; align-items: center; padding: 5px 14px; background: rgba(10,12,16,.9); border-top: 1px solid var(--line); backdrop-filter: blur(6px); font: 12px/1.4 var(--ui); color: var(--dim); flex-wrap: wrap; }
+#statusbar .sb-item { display: flex; align-items: center; gap: 6px; white-space: nowrap; } #statusbar .sb-item span { color: var(--dim); }
+#statusbar .sb-item i { width: 8px; height: 8px; border-radius: 50%; background: #3a3f4a; } #statusbar .sb-item.on { color: var(--fg); } #statusbar .sb-item.on i { background: var(--ok); }
+body.editing #statusbar { bottom: 54px; }
+/* The AUTO editor's step panels sit above the status bar, so that no bar clips them. */
+#stepSettings { position: fixed; right: 12px; bottom: 92px; width: 330px; z-index: 12; font-size: 12px; padding: 10px 12px; }
+#stepSettings .ss-note { color: var(--dim); font-size: 11px; margin: 0 0 8px; }
+#stepSettings .ss-row { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; margin-bottom: 8px; } #stepSettings .ss-row:last-child { margin-bottom: 0; }
+#stepSettings .ss-row label { display: inline; margin: 0; min-width: 44px; color: var(--fg); font-weight: 600; } #stepSettings .ss-row span { color: var(--dim); font-size: 11px; }
+#stepSettings select { flex: 1; font-size: 12px; } #stepSettings input[type=number] { width: 58px; font-size: 12px; padding: 3px 6px; }
+#stepOrder { position: fixed; right: 330px; bottom: 92px; width: 220px; z-index: 12; font-size: 12px; padding: 8px 10px; max-height: calc(100vh - 132px); overflow-y: auto; }
+.note { color: var(--dim); font-size: 11px; margin: 5px 0 0; } .note b { color: var(--fg); } .note.lead { margin: 0 0 6px; }
+.keys.grid { margin-top: 6px; } #aehelp { font-weight: 700; }
+#helpbox .panel { width: 640px; max-width: calc(100vw - 24px); max-height: calc(100vh - 88px); overflow-y: auto; }
+#openkeybinds { width: auto; margin: 0; padding: 2px 10px; font-size: 12px; }
+#keybinds .panel { width: 340px; } #kbtable { width: 100%; border-collapse: collapse; font-size: 12px; } #keybinds .btns { margin-top: 8px; }
+#kbtable tr { cursor: pointer; } #kbtable tr.on { background: rgba(77,125,255,.25); } #kbtable td { padding: 4px 6px; color: var(--dim); } #kbtable td + td { text-align: right; }
+#kbtable kbd { background: #232831; border: 1px solid var(--line); border-radius: 4px; padding: 1px 7px; font: 12px var(--mono); color: var(--fg); } #kbtable tr.on kbd { color: var(--blue); }
+.bothead b.red { background: var(--red); } .bothead b.blue { background: var(--blue); }
+#treebots button.red { border-color: var(--red); } #treebots button.blue { border-color: var(--blue); }
+#final .win.red, #final .big .red { background: var(--red); } #final .win.blue, #final .big .blue { background: var(--blue); } #final .win.tie { background: #5b6370; }
+#final .hint { color: var(--dim); margin-top: 6px; text-align: center; }
+#stepOrder h3 { margin: 0 0 4px; font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--dim); } #stepOrder p { color: var(--dim); margin: 0; font-size: 11px; }
+.step-row { display: flex; align-items: center; gap: 4px; padding: 2px 0; cursor: pointer; border-radius: 3px; } .step-row.sel { background: rgba(255,167,38,.22); }
+.step-row > span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: var(--fg); } .step-row.sel > span { color: #ffd54f; } .step-row > span span { color: var(--dim); }
+.step-row button { width: 18px; height: 18px; padding: 0; font-size: 10px; margin: 0; border-radius: 3px; flex-shrink: 0; } .step-row button.del { font-size: 11px; color: #ff8a80; }

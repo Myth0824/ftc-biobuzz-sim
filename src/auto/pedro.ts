@@ -1,16 +1,20 @@
 /**
  * Reads a Pedro Pathing OpMode's Java source and writes an AUTO tree that drives the same paths. It understands both
  * Pedro APIs: the 1.x builder (`new BezierLine`, `pathBuilder().addPath(...).setLinearHeadingInterpolation(...)`) and the
- * 2.x one (`line(a, b).linear(a, b)`, `curve(...)`, `.constant(h)`, `.tangent()`). It doesn't run the OpMode: it
- * evaluates the declarations of numbers, poses, and paths, and takes the paths in the order that the source follows
- * them. It also reads the mechanism calls between and inside the paths, by their names: an intake that runs while a
- * path is followed wraps that path with `intake.run`, a launch becomes `shooter.shoot`, and a sleep or a timer
- * becomes `wait`. See `mechanism` for the names it knows.
+ * 2.x one (`line(a, b).linear(a, b)`, `curve(...)`, `.constant(h)`, `.tangent()`). It doesn't run the OpMode: a Java
+ * parser (java-parser, the one behind prettier-plugin-java) gives the file's structure, a small evaluator works out the
+ * numbers, poses, and paths that the file declares, and the paths run in the order that the source follows them. It
+ * also reads the mechanism calls between and inside the paths, by their names: an intake that runs while a path is
+ * followed wraps that path with `intake.run`, a launch becomes `shooter.shoot`, and a sleep or a timer becomes `wait`.
+ * See `mechanism` for the names it knows.
  *
  * Pedro poses are in inches on a 144 in. FIELD with the origin in a corner, and headings in radians. Trees are in
  * meters from the FIELD center, in red's frame. A source whose start pose is on the far half from red's wall is
  * rotated 180°, as a blue robot's tree would be. See docs/behavior-trees.md#coordinates-and-alliances.
  */
+import type { CstNode, IToken } from 'java-parser';
+
+type CstEl = CstNode | IToken;
 
 const IN = 0.0254, HALF_IN = 72;
 
@@ -20,7 +24,7 @@ interface Segment { kind: 'segment'; pts: PPose[]; heading: Heading; /** Set by 
 interface Chain { kind: 'chain'; segments: Segment[] }
 /** An object the importer doesn't model, such as the follower, or the `Math` class. */
 interface Opaque { kind: 'opaque' | 'math' }
-/** A lambda, kept as the mechanism events in its body, for path callbacks. */
+/** A lambda or a method reference, kept as the mechanism events that it runs, for path callbacks. */
 interface Lambda { kind: 'lambda'; events: Mech[] }
 /** A name that isn't declared yet. A field access on it can still find a declared path, as in `paths.score`. */
 interface Name { kind: 'name'; name: string }
@@ -30,16 +34,18 @@ const OPAQUE: Opaque = { kind: 'opaque' }, MATH: Opaque = { kind: 'math' };
 const isPose = (v: Value): v is PPose => typeof v === 'object' && v.kind === 'pose';
 const isSeg = (v: Value): v is Segment => typeof v === 'object' && v.kind === 'segment';
 const isChain = (v: Value): v is Chain => typeof v === 'object' && v.kind === 'chain';
+const isPath = (v: Value) => isSeg(v) || isChain(v);
 const num = (v: Value, what: string): number => { if (typeof v === 'number') return v; if (isPose(v)) return v.h; throw new Error(`${what} isn't a number`); };
 const pose = (v: Value, what: string): PPose => { if (isPose(v)) return v; throw new Error(`${what} isn't a pose`); };
 const segment = (pts: Value[]): Segment => ({ kind: 'segment', pts: pts.map((p, i) => pose(p, `control point ${i + 1}`)), heading: { kind: 'tangent', reversed: false } });
+const wrap = (a: number) => Math.atan2(Math.sin(a), Math.cos(a));
 
-// ---- A small evaluator for the Java expressions that declare poses and paths ----
+// ---- A small evaluator for the expressions that declare poses and paths ----
 
 type Tok = { t: 'num'; v: number } | { t: 'id'; v: string } | { t: 'op'; v: string };
 
 function tokenize(src: string): Tok[] {
-  const out: Tok[] = [], re = /\s*(?:(\d+\.?\d*(?:[eE][+-]?\d+)?|\.\d+(?:[eE][+-]?\d+)?)[dDfFlL]?|([A-Za-z_$][\w$]*)|(->|::|[-+*/%().,<>?:!=&|\[\]]))/y;
+  const out: Tok[] = [], re = /\s*(?:(\d+\.?\d*(?:[eE][+-]?\d+)?|\.\d+(?:[eE][+-]?\d+)?)[dDfFlL]?|([A-Za-z_$][\w$]*)|([-+*/%().,<>?:!=&|\[\]]))/y;
   let m: RegExpExecArray | null;
   while (re.lastIndex < src.length && (m = re.exec(src))) {
     if (m[1] !== undefined) out.push({ t: 'num', v: Number(m[1]) }); else if (m[2]) out.push({ t: 'id', v: m[2] }); else if (m[3]) out.push({ t: 'op', v: m[3] });
@@ -48,6 +54,7 @@ function tokenize(src: string): Tok[] {
   return out;
 }
 
+/** Evaluates one expression. The parser has replaced each lambda and method reference in it with a name in `env`. */
 class Expr {
   private i = 0;
   constructor(private toks: Tok[], private env: Map<string, Value>) {}
@@ -89,11 +96,7 @@ class Expr {
     const t = this.toks[this.i++];
     if (!t) throw new Error('the expression ends early');
     if (t.t === 'num') return t.v;
-    if (t.t === 'op' && t.v === '(') {
-      let depth = 1, j = this.i; while (j < this.toks.length && depth) { const u = this.toks[j++]; if (u.t === 'op') depth += u.v === '(' ? 1 : u.v === ')' ? -1 : 0; }
-      if (this.toks[j]?.t === 'op' && this.toks[j].v === '->') { this.i = j; return this.skipLambda(); }
-      const v = this.sum(); this.eat(')'); return v;
-    }
+    if (t.t === 'op' && t.v === '(') { const v = this.sum(); this.eat(')'); return v; }
     if (t.t !== 'id') throw new Error(`unexpected "${t.v}"`);
     if (t.v === 'new') {
       let type = (this.toks[this.i++] as { v: string }).v;
@@ -107,21 +110,8 @@ class Expr {
     return this.env.get(t.v) ?? { kind: 'name', name: t.v };
   }
 
-  /** Skips a lambda from its arrow to the end of the argument that holds it, and keeps the mechanism calls in it. */
-  private skipLambda(): Value {
-    const from = this.i;
-    for (let depth = 0; this.i < this.toks.length; this.i++) {
-      const u = this.toks[this.i]; if (u.t !== 'op') continue;
-      if (u.v === '(') depth++; else if (u.v === ')' && --depth < 0) break; else if (u.v === ',' && depth === 0) break;
-    }
-    const body = this.toks.slice(from + 1, this.i).map(u => u.v).join(' ');
-    const calls = scan(body, new Map(), new Map()).flatMap(e => (e.kind === 'intakeOn' || e.kind === 'intakeOff' || e.kind === 'shoot' ? [e.kind] : []));
-    return { kind: 'lambda', events: [...[...body.matchAll(/__mech_(\w+)/g)].map(m => m[1] as Mech), ...calls] };
-  }
-
   private postfix(v: Value): Value {
     for (;;) {
-      if (this.peek('->')) return this.skipLambda();
       if (!this.peek('.')) return resolve(v, this.env);
       this.i++; const name = (this.toks[this.i++] as { v: string }).v;
       if (this.peek('(')) { v = call(resolve(v, this.env), name, this.args()); continue; }
@@ -148,8 +138,6 @@ function construct(type: string, a: Value[]): Value {
   if (type === 'PathBuilder') return { kind: 'chain', segments: [] };
   return OPAQUE;
 }
-
-const wrap = (a: number) => Math.atan2(Math.sin(a), Math.cos(a));
 
 function call(on: Value | null, name: string, a: Value[]): Value {
   if (on === MATH) {
@@ -184,41 +172,23 @@ function call(on: Value | null, name: string, a: Value[]): Value {
       case 'constant': case 'setConstantHeadingInterpolation': case 'setGlobalConstantHeadingInterpolation': return set({ kind: 'constant', h: num(a[0], 'the heading') });
       case 'tangent': case 'setTangentHeadingInterpolation': case 'setGlobalTangentHeadingInterpolation': return set({ kind: 'tangent', reversed: false });
       case 'reversed': return set({ kind: 'tangent', reversed: true });
+      case 'setReversed': return a[0] === false ? on : set({ kind: 'tangent', reversed: true });
       case 'addParametricCallback': case 'addTemporalCallback': case 'addPoseCallback': case 'addCallback': {
         const events = a.flatMap(v => (typeof v === 'object' && v.kind === 'lambda' ? v.events : []));
         for (const s of targets) { if (events.includes('intakeOn')) s.intake = true; if (events.includes('shoot')) s.shoot = true; }
         return on;
       }
-      case 'setReversed': return a[0] === false ? on : set({ kind: 'tangent', reversed: true });
-      default: return on; // build(), callbacks, braking, and timeouts don't change the geometry.
+      default: return on; // build(), braking, and timeouts don't change the geometry.
     }
   }
   return OPAQUE;
 }
 
-// ---- Reading the source ----
-
-/** Removes comments and string literals. */
-const strip = (src: string) => src.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/\/\/[^\n]*/g, ' ').replace(/"(?:\\.|[^"\\])*"/g, '""');
-
-/** The index of the bracket that closes the one at `open`. */
-function closing(src: string, open: number): number {
-  const o = src[open], c = o === '{' ? '}' : ')';
-  for (let i = open, depth = 0; i < src.length; i++) { if (src[i] === o) depth++; else if (src[i] === c && --depth === 0) return i; }
-  return src.length;
-}
-
-/**
- * Replaces each lambda body in braces with one expression, so that the statement splitter doesn't cut it: the
- * mechanism events in the body, as `__mech_` names, or `null`.
- */
-function foldLambdas(src: string): string {
-  for (let at = src.search(/->\s*\{/); at >= 0; at = src.search(/->\s*\{/)) {
-    const open = src.indexOf('{', at), end = closing(src, open);
-    const events = scan(src.slice(open + 1, end), new Map(), new Map()).map(e => e.kind).filter(k => k !== 'path' && k !== 'boundary' && k !== 'wait');
-    src = `${src.slice(0, at)}-> ${events.length ? `(${events.map(k => `__mech_${k}`).join(' + ')})` : 'null'}${src.slice(end + 1)}`;
-  }
-  return src;
+/** The Bézier point at `t`, by de Casteljau. */
+function bezier(pts: PPose[], t: number): { x: number; y: number } {
+  let p = pts.map(q => ({ x: q.x, y: q.y }));
+  while (p.length > 1) p = p.slice(1).map((q, i) => ({ x: p[i].x + (q.x - p[i].x) * t, y: p[i].y + (q.y - p[i].y) * t }));
+  return p[0];
 }
 
 // ---- Mechanism calls ----
@@ -227,7 +197,7 @@ type Mech = 'intakeOn' | 'intakeOff' | 'shoot';
 type Event = { kind: Mech | 'boundary' } | { kind: 'path'; name: string } | { kind: 'wait'; sec: number };
 
 const INTAKE = /intake|collect|roller|sweep|brush/, SHOT = /^(shoot|launch|fire|kick|flick|feed|score|release)/, FEEDER = /feed|kick|flick|push|index|transfer|gate/;
-/** Methods that read a mechanism or wait for the follower: a check, not an action. */
+/** Methods that read a mechanism or the follower: a check, not an action. */
 const QUERY = /^(get|is|has|read|at|following)/;
 
 /**
@@ -251,83 +221,194 @@ function mechanism(recv: string, method: string, arg: Value): Mech | null {
 
 /** A timer that a condition compares, as `pathTimer.getElapsedTimeSeconds() > 1.5`, in seconds per unit it reads. */
 const TIMER: Record<string, number> = { getelapsedtimeseconds: 1, seconds: 1, time: 1, getelapsedtime: 1e-3, milliseconds: 1e-3 };
-/** Calls that wait: `sleep(ms)`, an FTCLib `WaitCommand(ms)`, and a NextFTC `Delay(s)`. */
+/** Calls and commands that wait: `sleep(ms)`, an FTCLib `WaitCommand(ms)`, and a NextFTC `Delay(s)`. */
 const SLEEP: Record<string, number> = { sleep: 1e-3, waitcommand: 1e-3, sleepcommand: 1e-3, delay: 1, waitseconds: 1 };
+const FOLLOW_CMD = /^Follow(Path)?(Command)?$/, FOLLOWER_CHECK = /^(isBusy|following|atParametricEnd|isRobotStuck)$/;
 
-/** A call, as `a.b(`, or a method reference, as `a::b`. */
-const CALL = /\b(new\s+)?([A-Za-z_$][\w$]*(?:\s*\.\s*[A-Za-z_$][\w$]*)*)\s*(?:\(|::\s*([A-Za-z_$][\w$]*))/g;
-const DECL = /\b(?:void|boolean|int|double|float|long|[A-Z][\w$<>,\[\] ]*)\s+([A-Za-z_$][\w$]*)\s*\([^()]*\)\s*(?:throws\s+[\w$., ]+)?\{/g;
+// ---- Reading the parse tree ----
 
-/** The methods that the class declares, by name, with their bodies. */
-function methods(src: string): Map<string, string> {
-  const out = new Map<string, string>();
-  for (const m of src.matchAll(DECL)) { const open = m.index! + m[0].length - 1; out.set(m[1], src.slice(open + 1, closing(src, open))); }
+const isTok = (x: CstEl): x is IToken => 'image' in x;
+const at = (x: CstEl) => (isTok(x) ? x.startOffset : x.location.startOffset);
+const endOf = (x: CstEl) => (isTok(x) ? x.endOffset : x.location.endOffset);
+/** A node's children, tokens too, in source order. The parser groups them by kind. */
+const kids = (n: CstNode): CstEl[] => Object.values(n.children).flat().sort((a, b) => at(a) - at(b));
+const child = (n: CstNode, name: string) => n.children[name]?.[0] as CstNode | undefined;
+/** Every node named `name` under `n`, in source order, `n` included. */
+function nodes(n: CstNode, name: string, out: CstNode[] = []): CstNode[] {
+  if (n.name === name) out.push(n);
+  for (const c of kids(n)) if (!isTok(c)) nodes(c, name, out);
   return out;
 }
+/** The tokens under `n`, in source order. */
+const tokens = (n: CstEl): IToken[] => (isTok(n) ? [n] : kids(n).flatMap(tokens));
 
-/**
- * Lists the paths followed, the mechanism calls, and the waits in `src`, in source order. A call to one of the class's
- * own methods is read in place of the call. A `case` label or a check on the follower is a boundary: the path before it
- * has ended.
- */
-function scan(src: string, env: Map<string, Value>, own: Map<string, string>, depth = 0): Event[] {
-  const out: Event[] = [], val = (a: string): Value => { try { return Expr.eval(a, env); } catch { return undefined; } };
-  const isPath = (n: string) => { const v = env.get(n.split('.').pop()!); return isSeg(v) || isChain(v); };
-  const marks = [...src.matchAll(/\bcase\b|\bdefault\s*:/g)].map(m => m.index!);
-  let mark = 0;
-  for (const m of src.matchAll(CALL)) {
-    const at = m.index!;
-    while (mark < marks.length && marks[mark] < at) { out.push({ kind: 'boundary' }); mark++; }
-    if (m[3]) { const mech = mechanism(m[2].replace(/\s+/g, ''), m[3], undefined); if (mech) out.push({ kind: mech }); continue; }
-    const chain = m[2].replace(/\s+/g, ''), parts = chain.split('.'), method = parts.pop()!, recv = parts.join('.');
-    const open = at + m[0].length - 1, args = src.slice(open + 1, closing(src, open)).split(','), lower = method.toLowerCase();
-    if (/^(if|while|for|switch|catch|synchronized|return)$/.test(method)) continue;
-    // A declaration, as `void runIntake() {`, isn't a call.
-    const before = src.slice(Math.max(0, at - 40), at);
-    if (!m[1] && /[\w$>\]]\s+$/.test(before) && !/(\b(new|return|else)|->)\s+$/.test(before)) continue;
-    if (method === 'follow' || method === 'followPath' || (m[1] && /^Follow(Path)?(Command)?$/.test(method))) {
-      const name = args.map(a => a.trim()).find(isPath); if (name) out.push({ kind: 'path', name: name.split('.').pop()! }); continue;
-    }
-    if (/^(isBusy|following|atParametricEnd|isRobotStuck)$/.test(method)) { out.push({ kind: 'boundary' }); continue; }
-    if (SLEEP[lower] !== undefined) { const v = val(args[0]); if (typeof v === 'number') out.push({ kind: 'wait', sec: v * SLEEP[lower] }); continue; }
-    if (TIMER[lower] !== undefined) {
-      // A timer is a wait when the condition compares it alone, not as a timeout beside the follower's check.
-      const cond = /^\s*\)\s*>=?\s*([^)&|;?]+)/.exec(src.slice(closing(src, open)));
-      const condition = src.slice(src.lastIndexOf('if', at), at);
-      if (cond && !/\|\||isBusy/.test(condition)) { const v = val(cond[1]); if (typeof v === 'number' && v > 0) out.push({ kind: 'wait', sec: v * TIMER[lower] }); }
-      continue;
-    }
-    if (!recv && own.has(method) && depth < 4) {
-      const inner = scan(own.get(method)!, env, own, depth + 1);
-      if (inner.some(e => e.kind !== 'boundary')) { out.push(...inner); continue; }
-    }
-    const mech = mechanism(recv, method, val(args[0]));
-    if (mech) out.push({ kind: mech });
+/** Blanks out comments, keeping every offset, so that a slice of the source is an expression the evaluator can read. */
+function blankComments(src: string): string {
+  let out = '';
+  for (let i = 0; i < src.length;) {
+    const c = src[i], two = src.slice(i, i + 2);
+    if (two === '//' || two === '/*') { const end = two === '//' ? src.indexOf('\n', i) : src.indexOf('*/', i + 2) + 2; const j = end < (two === '//' ? 0 : 2) ? src.length : end; out += src.slice(i, j).replace(/[^\n]/g, ' '); i = j; continue; }
+    if (c === '"' || c === '\'') { let j = i + 1; while (j < src.length && src[j] !== c) j += src[j] === '\\' ? 2 : 1; out += src.slice(i, j + 1); i = j + 1; continue; }
+    out += c; i++;
   }
   return out;
 }
 
-/** The Bézier point at `t`, by de Casteljau. */
-function bezier(pts: PPose[], t: number): { x: number; y: number } {
-  let p = pts.map(q => ({ x: q.x, y: q.y }));
-  while (p.length > 1) p = p.slice(1).map((q, i) => ({ x: p[i].x + (q.x - p[i].x) * t, y: p[i].y + (q.y - p[i].y) * t }));
-  return p[0];
-}
+/** One method call: `recv.method(args)`. `recv` is the dotted text before the method, with call arguments left out. */
+interface Call { recv: string; method: string; args: CstNode[]; node: CstNode }
+/** One `new Type(args)`. */
+interface New { type: string; args: CstNode[] }
 
-/** Splits a declaration of several variables, as `Pose a = new Pose(1, 2, 0), b = ...`, into one per variable. */
-function declarators(s: string): string[] {
-  const out: string[] = [];
-  let depth = 0, from = 0;
-  for (let i = 0; i <= s.length; i++) {
-    const ch = s[i];
-    if (ch === '(') depth++; else if (ch === ')') depth--;
-    else if ((ch === ',' && depth === 0) || i === s.length) {
-      const part = s.slice(from, i).trim();
-      if (out.length && !/^[A-Za-z_$][\w$]*\s*=(?!=)/.test(part)) out[out.length - 1] += `, ${part}`; else out.push(part);
-      from = i + 1;
+class Source {
+  readonly env = new Map<string, Value>();
+  /** The OpMode's own methods, by name, and those of them that follow no path. */
+  readonly methods = new Map<string, CstNode>(); readonly helpers = new Set<string>();
+  private lambdaNames = new Map<CstNode, string>();
+
+  constructor(readonly text: string, readonly root: CstNode) {
+    for (const m of nodes(root, 'methodDeclaration')) {
+      const name = tokens(child(child(m, 'methodHeader')!, 'methodDeclarator')!).find(t => t.tokenType.name === 'Identifier')?.image, body = child(m, 'methodBody');
+      if (!name || !body) continue;
+      this.methods.set(name, body);
+      if (!this.follows(body)) this.helpers.add(name);
     }
   }
-  return out;
+
+  slice(n: CstEl) { return this.text.slice(at(n), endOf(n) + 1); }
+  argsOf(n: CstNode | undefined): CstNode[] { const list = n && child(n, 'argumentList'); return list ? (list.children.expression as CstNode[]).slice().sort((a, b) => at(a) - at(b)) : []; }
+
+  /** True when `n` follows a path anywhere inside it. */
+  follows(n: CstNode): boolean { return this.calls(n).some(c => c.method === 'follow' || c.method === 'followPath') || this.news(n).some(c => FOLLOW_CMD.test(c.type)); }
+
+  /** The method calls in `n`, in source order. A call on a call's result, as `a.b().c()`, has the receiver `a.b.c`'s first part. */
+  calls(n: CstNode): Call[] { return nodes(n, 'primary').flatMap(p => this.callsOf(p)); }
+  private callsOf(p: CstNode): Call[] {
+    const prefix = child(p, 'primaryPrefix')!, out: Call[] = [];
+    let chain = this.prefixName(prefix);
+    for (const s of (p.children.primarySuffix ?? []) as CstNode[]) {
+      const inv = child(s, 'methodInvocationSuffix'), dot = s.children.Identifier?.[0] as IToken | undefined;
+      if (inv) { const parts = chain.split('.'), method = parts.pop()!; out.push({ recv: parts.join('.'), method, args: this.argsOf(inv), node: s }); }
+      else if (dot) chain += `.${dot.image}`;
+    }
+    return out;
+  }
+  /** The dotted name that a primary starts with, as `robot.intake.setPower`, or '' for anything else. */
+  private prefixName(prefix: CstNode): string {
+    const ref = child(prefix, 'fqnOrRefType'); if (ref) return tokens(ref).filter(t => t.tokenType.name !== 'Dot' && t.tokenType.name !== 'At').map(t => t.image).join('.');
+    return prefix.children.This ? 'this' : '';
+  }
+  /** The `new` expressions in `n`, in source order. */
+  news(n: CstNode): New[] {
+    return nodes(n, 'unqualifiedClassInstanceCreationExpression').map(u => ({ type: tokens(child(u, 'classOrInterfaceTypeToInstantiate')!).filter(t => t.tokenType.name === 'Identifier').pop()?.image ?? '', args: this.argsOf(u) }));
+  }
+
+  /** An expression's text for the evaluator, with each lambda and method reference in it replaced by a name in `env`. */
+  expr(n: CstNode): string {
+    const cut: CstNode[] = [];
+    for (const l of nodes(n, 'lambdaExpression')) if (!cut.some(c => at(c) <= at(l) && endOf(l) <= endOf(c))) cut.push(l);
+    for (const p of nodes(n, 'primary')) if ((p.children.primarySuffix as CstNode[] | undefined)?.some(s => child(s, 'methodReferenceSuffix')) && !cut.some(c => at(c) <= at(p) && endOf(p) <= endOf(c))) cut.push(p);
+    cut.sort((a, b) => at(a) - at(b));
+    let text = '', from = at(n);
+    for (const c of cut) { text += this.text.slice(from, at(c)) + this.lambda(c); from = endOf(c) + 1; }
+    return text + this.text.slice(from, endOf(n) + 1);
+  }
+  private lambda(n: CstNode): string {
+    let name = this.lambdaNames.get(n);
+    if (!name) {
+      name = `__fn${this.lambdaNames.size}`; this.lambdaNames.set(n, name);
+      const events = n.name === 'lambdaExpression' ? this.scan(n).flatMap(e => (e.kind === 'intakeOn' || e.kind === 'intakeOff' || e.kind === 'shoot' ? [e.kind] : []))
+        : (() => { const s = (n.children.primarySuffix as CstNode[]).find(x => child(x, 'methodReferenceSuffix'))!, m = tokens(child(s, 'methodReferenceSuffix')!).find(t => t.tokenType.name === 'Identifier')?.image ?? ''; const k = mechanism(this.prefixName(child(n, 'primaryPrefix')!), m, undefined); return k ? [k] : []; })();
+      this.env.set(name, { kind: 'lambda', events });
+    }
+    return name;
+  }
+  value(n: CstNode | undefined): Value { if (!n) return undefined; try { return Expr.eval(this.expr(n), this.env); } catch { return undefined; } }
+
+  /**
+   * Lists the paths followed, the mechanism calls, and the waits in `n`, in source order. A call to one of the OpMode's
+   * helper methods is read in place of the call, and a helper's own body is skipped where it is declared. A `case`
+   * label or a check on the follower is a boundary: the path before it has ended.
+   */
+  scan(n: CstNode, depth = 0, out: Event[] = []): Event[] {
+    switch (n.name) {
+      case 'switchLabel': out.push({ kind: 'boundary' }); return out;
+      case 'methodDeclaration': { const name = [...this.methods].find(([, b]) => at(b) >= at(n) && endOf(b) <= endOf(n))?.[0]; if (name && this.helpers.has(name)) return out; break; }
+      case 'primary': this.scanPrimary(n, depth, out); return out;
+      case 'binaryExpression': for (const c of kids(n)) if (!isTok(c)) this.scan(c, depth, out); this.timerWaits(n, out); return out;
+    }
+    for (const c of kids(n)) if (!isTok(c)) this.scan(c, depth, out);
+    return out;
+  }
+
+  private scanPrimary(p: CstNode, depth: number, out: Event[]) {
+    const prefix = child(p, 'primaryPrefix')!, created = child(prefix, 'newExpression');
+    if (created) {
+      const u = nodes(created, 'unqualifiedClassInstanceCreationExpression')[0], made = u && this.news(u)[0];
+      if (made && FOLLOW_CMD.test(made.type)) this.followed(made.args, out);
+      else if (made && SLEEP[made.type.toLowerCase()] !== undefined) this.slept(made.type, made.args, out);
+      else for (const a of made?.args ?? []) this.scan(a, depth, out);
+    } else if (!child(prefix, 'fqnOrRefType')) for (const c of kids(prefix)) if (!isTok(c)) this.scan(c, depth, out);
+    for (const c of this.callsOf(p)) this.scanCall(c, depth, out);
+    const ref = (p.children.primarySuffix as CstNode[] | undefined)?.find(s => child(s, 'methodReferenceSuffix'));
+    if (ref) { const m = tokens(ref).find(t => t.tokenType.name === 'Identifier')?.image ?? '', k = mechanism(this.prefixName(prefix), m, undefined); if (k) out.push({ kind: k }); }
+  }
+
+  private scanCall(c: Call, depth: number, out: Event[]) {
+    const lower = c.method.toLowerCase();
+    if (c.method === 'follow' || c.method === 'followPath') return this.followed(c.args, out);
+    if (/^add\w*Callback$/.test(c.method)) return; // A path callback was read with its path.
+    if (FOLLOWER_CHECK.test(c.method)) { out.push({ kind: 'boundary' }); return; }
+    if (SLEEP[lower] !== undefined) return this.slept(c.method, c.args, out);
+    if ((!c.recv || c.recv === 'this') && this.helpers.has(c.method) && depth < 4) {
+      const inner = this.scan(this.methods.get(c.method)!, depth + 1);
+      if (inner.some(e => e.kind !== 'boundary')) { out.push(...inner); return; }
+    }
+    const k = mechanism(c.recv, c.method, this.value(c.args[0]));
+    if (k) { out.push({ kind: k }); return; }
+    for (const a of c.args) this.scan(a, depth, out);
+  }
+
+  private followed(args: CstNode[], out: Event[]) {
+    for (const a of args) { const v = this.value(a); if (isPath(v)) { out.push({ kind: 'path', name: this.pathName(a) }); return; } }
+  }
+  /** The name a followed path goes by: its variable's name, the last part of `paths.score`. */
+  private pathName(a: CstNode) { return this.slice(a).trim().split('.').pop()!; }
+  private slept(name: string, args: CstNode[], out: Event[]) { const v = this.value(args[0]); if (typeof v === 'number') out.push({ kind: 'wait', sec: v * SLEEP[name.toLowerCase()] }); }
+
+  /** A timer compared alone in a condition, as `t.seconds() > 1.5`, is a wait. Beside `||` or the follower's check, it is a timeout. */
+  private timerWaits(n: CstNode, out: Event[]) {
+    const ops = ((n.children.BinaryOperator ?? []) as IToken[]).slice().sort((a, b) => a.startOffset - b.startOffset), operands = ((n.children.unaryExpression ?? []) as CstNode[]).slice().sort((a, b) => at(a) - at(b));
+    if (ops.some(o => o.image === '||') || /isBusy/.test(this.slice(n))) return;
+    ops.forEach((o, k) => {
+      if (o.image !== '>' && o.image !== '>=') return;
+      const m = /(\w+)\s*\(\s*\)\s*$/.exec(this.slice(operands[k])), unit = m && TIMER[m[1].toLowerCase()];
+      const v = unit ? this.value(operands[k + 1]) : undefined;
+      if (unit && typeof v === 'number' && v > 0) out.push({ kind: 'wait', sec: v * unit });
+    });
+  }
+}
+
+/** Reads every assignment and declaration of a number, a pose, or a path into `src.env`, in two passes, so that a declaration can use a field that the file declares further down. */
+function declarations(src: Source, warnings: string[]) {
+  const assigns: [string, CstNode][] = [];
+  for (const d of nodes(src.root, 'variableDeclarator')) {
+    const name = tokens(child(d, 'variableDeclaratorId')!)[0]?.image, init = child(d, 'variableInitializer'), e = init && child(init, 'expression');
+    if (name && e) assigns.push([name, e]);
+  }
+  for (const b of nodes(src.root, 'binaryExpression')) {
+    const op = (b.children.AssignmentOperator as IToken[] | undefined)?.[0], lhs = child(b, 'unaryExpression'), rhs = child(b, 'expression');
+    if (op?.image === '=' && lhs && rhs) assigns.push([src.slice(lhs).trim().split('.').pop()!, rhs]);
+  }
+  assigns.sort((a, b) => at(a[1]) - at(b[1]));
+  // A statement that changes a path built before, such as `park.setLinearHeadingInterpolation(a, b)` or a callback.
+  const changes = nodes(src.root, 'expressionStatement').filter(s => /^\s*[A-Za-z_$][\w$]*\s*\.\s*(set\w*HeadingInterpolation|setReversed|add\w*Callback)\s*\(/.test(src.slice(s)));
+  for (let pass = 0; pass < 2; pass++) {
+    for (const [name, e] of assigns) {
+      try { const v = Expr.eval(src.expr(e), src.env); if (isPose(v) || isPath(v) || typeof v === 'number') src.env.set(name, typeof v === 'object' ? structuredClone(v) : v); }
+      catch (err) { if (pass === 1 && /\b(Pose|Bezier|line|curve|pathBuilder|Path)\b/.test(src.slice(e))) warnings.push(`Skipped ${name}: ${(err as Error).message}.`); }
+    }
+    if (pass === 1) for (const s of changes) { const name = /^\s*([A-Za-z_$][\w$]*)/.exec(src.slice(s))![1]; if (isPath(src.env.get(name))) try { Expr.eval(src.expr(child(child(s, 'statementExpression')!, 'expression')!), src.env); } catch { /* reported above */ } }
+  }
 }
 
 export interface PedroWaypoint { x: number; y: number; headingDeg: number | null }
@@ -337,41 +418,26 @@ export interface PedroImport {
 }
 
 /**
- * Converts a Pedro Pathing OpMode to an AUTO tree. Throws when the source has no path that it can read.
+ * Converts a Pedro Pathing OpMode to an AUTO tree. Throws when the file isn't Java, or has no path that it can read. The
+ * Java parser loads on the first import.
  * @param fileName The source file's name. The class name in the source names the tree; the file name is the fallback.
  */
-export function importPedro(java: string, fileName = 'Auto.java'): PedroImport {
-  const stripped = strip(java), src = foldLambdas(stripped), env = new Map<string, Value>(), warnings: string[] = [];
-  const statements = src.split(/[;{}]/).map(s => s.replace(/\s+/g, ' ').trim()).filter(Boolean).flatMap(declarators);
-  // Two passes, so a declaration can use a field that the file declares further down.
-  for (let pass = 0; pass < 2; pass++) {
-    for (const s of statements) {
-      const m = /^(?:@\w+(?:\([^)]*\))?\s+)*(?:[\w$<>,\[\]. ]+\s)?([A-Za-z_$][\w$]*)\s*=(?!=)\s*(.+)$/.exec(s);
-      if (!m || /^(if|for|while|return|case)\b/.test(s)) continue;
-      try { const v = Expr.eval(m[2], env); if (isPose(v) || isSeg(v) || isChain(v) || typeof v === 'number') env.set(m[1], typeof v === 'object' ? structuredClone(v) : v); }
-      catch (e) { if (pass === 1 && /\b(Pose|Bezier|line|curve|pathBuilder|Path)\b/.test(m[2])) warnings.push(`Skipped ${m[1]}: ${(e as Error).message}.`); }
-    }
-    // Statements that aren't assignments: a heading call on a path that was built before, such as `park.setLinearHeadingInterpolation(a, b)`.
-    for (const s of statements) {
-      const m = /^([A-Za-z_$][\w$]*)\.(set\w*HeadingInterpolation|setReversed|add\w*Callback)\((.*)\)$/.exec(s);
-      if (m && pass === 1 && (isSeg(env.get(m[1])) || isChain(env.get(m[1])))) try { Expr.eval(s, env); } catch { /* reported above */ }
-    }
-  }
-  // The OpMode's own methods that follow no path, such as `runIntake()`, are read where they are called. Path callbacks
-  // were read with their paths.
-  let body = stripped;
-  for (const m of body.matchAll(/\.add\w*Callback\s*\(/g)) { const open = m.index! + m[0].length - 1, end = closing(body, open); body = body.slice(0, open + 1) + ' '.repeat(end - open - 1) + body.slice(end); }
-  const helpers = new Map([...methods(body)].filter(([, b]) => !/\.follow(Path)?\s*\(|\bFollow(Path)?(Command)?\s*\(/.test(b)));
-  for (const b of helpers.values()) body = body.replace(b, ' '.repeat(b.length));
-  const events = scan(body, env, helpers), order: string[] = [];
+export async function importPedro(java: string, fileName = 'Auto.java'): Promise<PedroImport> {
+  const { parse } = await import('java-parser'), text = blankComments(java);
+  let root: CstNode;
+  try { root = parse(text); } catch (err) { const m = /line: (\d+), column: (\d+)/.exec((err as Error).message); throw new Error(m ? `it doesn't read as Java at line ${m[1]}, column ${m[2]}` : 'it doesn\'t read as Java'); }
+  const src = new Source(text, root), env = src.env, warnings: string[] = [];
+  declarations(src, warnings);
+
+  const events = src.scan(root), order: string[] = [];
   for (const e of events) if (e.kind === 'path' && !order.includes(e.name)) order.push(e.name);
-  const paths = (order.length ? order : [...env.keys()]).filter(k => isSeg(env.get(k)) || isChain(env.get(k)));
+  const paths = (order.length ? order : [...env.keys()]).filter(k => isPath(env.get(k)));
   if (!paths.length) throw new Error('found no Pedro path: expected line(...), curve(...), new BezierLine(...), or pathBuilder()...build()');
   if (!order.length) warnings.push('The source never calls follow() or followPath(), so the paths run in the order they are declared.');
 
-  const startName = /\.(?:setStartingPose|setPose)\(\s*([\w$.]+)\s*\)/.exec(src)?.[1]?.split('.').pop();
   const firstSeg = (k: string) => { const v = env.get(k)!; return isSeg(v) ? v : (v as Chain).segments[0]; };
-  const start = (startName && isPose(env.get(startName)) ? env.get(startName) as PPose : firstSeg(paths[0])?.pts[0]);
+  const startCall = src.calls(root).find(c => c.method === 'setStartingPose' || c.method === 'setPose'), startValue = startCall && src.value(startCall.args[0]);
+  const start = isPose(startValue) ? startValue : firstSeg(paths[0])?.pts[0];
   if (!start) throw new Error('the first path has no points');
   // Trees are written for red. A start on the far half from red's wall means the source's origin is the other corner.
   const rotate = start.x > HALF_IN;
@@ -393,8 +459,9 @@ export function importPedro(java: string, fileName = 'Auto.java'): PedroImport {
     return out;
   };
 
-  const className = /\bclass\s+([A-Za-z_$][\w$]*)/.exec(src)?.[1] ?? fileName.replace(/\.java$/i, '');
-  const opName = /@Autonomous\s*\(\s*name\s*=\s*"([^"]*)"/.exec(java)?.[1];
+  const cls = nodes(root, 'normalClassDeclaration')[0], className = (cls && tokens(child(cls, 'typeIdentifier')!)[0]?.image) ?? fileName.replace(/\.java$/i, '');
+  const auto = nodes(root, 'annotation').find(a => /^@\s*Autonomous\b/.test(src.slice(a)));
+  const opName = auto && /\bname\s*=\s*"([^"]*)"/.exec(src.slice(auto))?.[1];
   const s0 = toField(start.x, start.y);
   const children: Record<string, unknown>[] = [{
     id: 's1', note: 'The OpMode\'s start pose. The planner drives there from wherever the robot starts in the simulator.',

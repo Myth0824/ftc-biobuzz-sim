@@ -48,8 +48,8 @@ public class BlueSide extends OpMode {
 const children = (t: Record<string, unknown>) => ((t.root as { sequence: { children: { ref: string; params: Record<string, unknown> }[] } }).sequence.children);
 
 describe('Pedro Pathing import', () => {
-  it('reads the 2.x template: start pose, a line, and linear heading', () => {
-    const { tree, warnings } = importPedro(V2, 'AutoTemplate.java');
+  it('reads the 2.x template: start pose, a line, and linear heading', async () => {
+    const { tree, warnings } = await importPedro(V2, 'AutoTemplate.java');
     expect(warnings).toEqual([]);
     expect(tree.id).toBe('pedro-auto-template');
     expect(tree.name).toBe('Pedro: Auto Template');
@@ -60,8 +60,8 @@ describe('Pedro Pathing import', () => {
     expect(() => { addAutoTree(tree); removeAutoTree(String(tree.id)); }).not.toThrow();
   });
 
-  it('reads the 1.x builder: curves are sampled, headings follow the interpolation, paths run in follow order', () => {
-    const { tree } = importPedro(V1, 'BlueSide.java');
+  it('reads the 1.x builder: curves are sampled, headings follow the interpolation, paths run in follow order', async () => {
+    const { tree } = await importPedro(V1, 'BlueSide.java');
     const c = children(tree), score = c[1].params.waypoints as { headingDeg: number | null }[];
     // The path's callback runs the intake, so the path runs beside intake.run.
     const [drive, intake] = (c[2] as unknown as { parallel: { children: { ref: string; params: Record<string, unknown> }[] } }).parallel.children;
@@ -72,13 +72,13 @@ describe('Pedro Pathing import', () => {
     expect(() => { addAutoTree(tree); removeAutoTree(String(tree.id)); }).not.toThrow();
   });
 
-  it('rotates a source that starts on the far half into the red frame', () => {
-    const { tree, warnings } = importPedro(V2.replace(/new Pose\(56,/g, 'new Pose(88,'));
+  it('rotates a source that starts on the far half into the red frame', async () => {
+    const { tree, warnings } = await importPedro(V2.replace(/new Pose\(56,/g, 'new Pose(88,'));
     expect(warnings[0]).toMatch(/rotated 180/);
     expect((tree.defs as Record<string, string>).start).toBe('pose(-0.406, 1.626, -90)');
   });
 
-  it('reads the mechanism calls of a state machine: intake, launches, and timers', () => {
+  it('reads the mechanism calls of a state machine: intake, launches, and timers', async () => {
     const src = `
 public class Mech extends OpMode {
     private final Pose a = new Pose(56, 8, 0), b = new Pose(56, 40, 0), c = new Pose(20, 40, 0);
@@ -101,7 +101,7 @@ public class Mech extends OpMode {
     }
     public void init() { follower.setStartingPose(a); buildPaths(); }
 }`;
-    const { tree, warnings } = importPedro(src, 'Mech.java'), c = children(tree) as unknown as Record<string, unknown>[];
+    const { tree, warnings } = await importPedro(src, 'Mech.java'), c = children(tree) as unknown as Record<string, unknown>[];
     expect(c.map(s => s.id)).toEqual(['s1', 's2', 's2-shoot', 's4', 's5', 's6', 's6-shoot']);
     expect(c.map(s => s.ref ?? 'parallel')).toEqual(['drive.driveTo', 'drive.followPath', 'shooter.shoot', 'parallel', 'parallel', 'drive.followPath', 'shooter.shoot']);
     // The sleep was held with the intake running, so the wait runs beside the intake too.
@@ -110,7 +110,7 @@ public class Mech extends OpMode {
     expect(() => { addAutoTree(tree); removeAutoTree(String(tree.id)); }).not.toThrow();
   });
 
-  it('reads a command-based auto', () => {
+  it('reads a command-based auto', async () => {
     const src = `
 public class Cmd extends CommandOpMode {
     private final Pose a = new Pose(56, 8, 0), b = new Pose(56, 40, 0);
@@ -126,11 +126,43 @@ public class Cmd extends CommandOpMode {
             new InstantCommand(shooter::shoot)));
     }
 }`;
-    const c = children(importPedro(src).tree) as unknown as Record<string, unknown>[];
+    const c = children((await importPedro(src)).tree) as unknown as Record<string, unknown>[];
     expect(c.map(s => s.ref ?? 'parallel')).toEqual(['drive.driveTo', 'parallel', 'wait', 'shooter.shoot']);
   });
 
-  it('rejects a file with no path', () => {
-    expect(() => importPedro('public class Empty { }')).toThrow(/no Pedro path/);
+  it('reads structure that text matching got wrong: comments, strings, generics, and nested blocks', async () => {
+    const src = `
+// followPath(fake) in a comment doesn't count, and neither does a string.
+public class Tricky extends LinearOpMode {
+    /* intake.setPower(1); */
+    private final Map<String, Pose> named = new HashMap<>();
+    private final Pose a = new Pose(56, 8, 0), b = new Pose(56, 40, 0);
+    private PathChain go;
+    @Override
+    public void runOpMode() {
+        this.go = follower.pathBuilder().addPath(new BezierLine(a, b)).build();
+        follower.setStartingPose(a);
+        telemetry.addData("note", "follower.followPath(fake); intake.setPower(1)");
+        waitForStart();
+        if (opModeIsActive()) {
+            for (int i = 0; i < 1; i++) { intake.setPower(1); }
+            follower.followPath(go);
+            while (opModeIsActive() && follower.isBusy()) { follower.update(); }
+            intake.setPower(0);
+            sleep(250);
+        }
+    }
+}`;
+    const { tree, warnings } = await importPedro(src, 'Tricky.java'), c = children(tree) as unknown as Record<string, unknown>[];
+    expect(c.map(s => s.ref ?? 'parallel')).toEqual(['drive.driveTo', 'parallel', 'wait']);
+    expect(warnings.join(' ')).toMatch(/2 intake calls and 0 launches/);
+  });
+
+  it('names the line where a file stops being Java', async () => {
+    await expect(importPedro('public class Broken {\n  void f() { x = ; }\n}')).rejects.toThrow(/line 2/);
+  });
+
+  it('rejects a file with no path', async () => {
+    await expect(importPedro('public class Empty { }')).rejects.toThrow(/no Pedro path/);
   });
 });
