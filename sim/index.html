@@ -4,21 +4,30 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>BIOBUZZ Sim</title>
+<link rel="manifest" href="/manifest.webmanifest" />
+<meta name="theme-color" content="#14171c" />
+<link rel="apple-touch-icon" href="/icons/icon-192.png" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M16 2 28 9v14l-12 7-12-7V9z' fill='%23f2c81e'/%3E%3C/svg%3E" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700;800&family=IBM+Plex+Mono:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" />
 <style>
-  :root { --bg: rgba(16,19,24,.82); --line: rgba(255,255,255,.1); --fg: #e9ecf1; --dim: #98a1ae; --red: #ef4a3c; --blue: #4d7dff; --pollen: #f2c81e; --ok: #41e07f; }
+  :root { --bg: rgba(16,19,24,.86); --line: rgba(255,255,255,.12); --fg: #e9ecf1; --dim: #a3abb7; --red: #ef4a3c; --blue: #4d7dff; --pollen: #f2c81e; --ok: #41e07f;
+    --ui: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; --display: "Barlow Condensed", ui-sans-serif, system-ui, sans-serif; --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace; }
   * { box-sizing: border-box; }
-  html, body { margin: 0; height: 100%; overflow: hidden; background: #14171c; color: var(--fg); font: 13px/1.4 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #14171c; color: var(--fg); font: 13px/1.45 var(--ui); }
   canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
   .panel { position: fixed; background: var(--bg); border: 1px solid var(--line); border-radius: 10px; backdrop-filter: blur(8px); padding: 10px 12px; }
   /* The scoreboard follows the FTC audience display: alliance blocks, solid score boxes, and a white timer in the middle. */
   #top { top: 12px; left: 50%; transform: translateX(-50%); display: flex; align-items: stretch; padding: 0; overflow: hidden; border-radius: 8px; }
-  #top .teams { display: flex; flex-direction: column; justify-content: center; padding: 0 12px; font: 700 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; color: #fff; }
-  #top .score { font: 800 34px/1 ui-sans-serif, system-ui, sans-serif; min-width: 92px; display: flex; align-items: center; justify-content: center; color: #fff; font-variant-numeric: tabular-nums; }
+  #top .teams { display: flex; flex-direction: column; justify-content: center; padding: 0 12px; font: 600 12px/1.6 var(--mono); color: #fff; }
+  .you { display: inline-block; padding: 0 5px; border-radius: 3px; background: #fff; color: #a3241b; font: 700 10px/16px var(--ui); vertical-align: middle; }
+  #top .score { font: 800 44px/1 var(--display); min-width: 96px; display: flex; align-items: center; justify-content: center; color: #fff; font-variant-numeric: tabular-nums; }
   #top .teams.red { background: #a3241b; } #top .score.red { background: var(--red); } #top .teams.blue { background: #1f3f9e; } #top .score.blue { background: var(--blue); }
   #top .mid { background: #f4f5f7; color: #14171c; padding: 5px 16px 4px; min-width: 128px; }
-  #clock { font: 800 32px/1 ui-sans-serif, system-ui, sans-serif; text-align: center; font-variant-numeric: tabular-nums; }
-  #phase { font-size: 10px; letter-spacing: .12em; text-transform: uppercase; color: #565d68; text-align: center; font-weight: 700; margin-top: 2px; }
-  h2 { margin: 0 0 6px; font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: var(--dim); font-weight: 600; }
+  #clock { font: 800 38px/1 var(--display); text-align: center; font-variant-numeric: tabular-nums; }
+  #phase { font: 700 12px/1 var(--display); letter-spacing: .08em; text-transform: uppercase; color: #565d68; text-align: center; margin-top: 3px; }
+  h2 { margin: 0 0 6px; font-size: 12px; color: var(--fg); font-weight: 600; }
   table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
   /* Score tables put the category in the middle, with red at one side and blue at the other, as FTC match results do. */
   table.ftc td { padding: 2px 4px; text-align: center; color: var(--dim); white-space: nowrap; } table.ftc td.r, table.ftc td.b { width: 50px; font-weight: 700; color: #fff; }
@@ -27,12 +36,27 @@
   table.ftc tr.total td { border-top: 1px solid var(--line); font-size: 15px; color: #fff; font-weight: 800; } table.ftc tr.total td.r { background: var(--red); } table.ftc tr.total td.b { background: var(--blue); }
   table.ftc tr.rprow td.r, table.ftc tr.rprow td.b { color: var(--ok); } table.ftc tr.sep td { border-top: 1px solid var(--line); }
   #final { top: 50%; left: 50%; transform: translate(-50%,-50%); width: 440px; padding: 0; overflow: hidden; }
-  #final .win { padding: 10px; text-align: center; font: 800 20px/1.2 ui-sans-serif, system-ui, sans-serif; letter-spacing: .06em; color: #fff; }
-  #final .big { display: flex; } #final .big div { flex: 1; text-align: center; font: 800 46px/1.3 ui-sans-serif, system-ui, sans-serif; color: #fff; font-variant-numeric: tabular-nums; }
+  #final { width: 460px; max-width: calc(100vw - 24px); max-height: calc(100vh - 48px); overflow-y: auto; }
+  #final .win { padding: 10px; text-align: center; font: 800 26px/1.1 var(--display); letter-spacing: .04em; color: #fff; }
+  #final .big { display: flex; } #final .big div { flex: 1; text-align: center; font: 800 72px/1.15 var(--display); color: #fff; font-variant-numeric: tabular-nums; }
+  /* The bracket reads left to right: each round is a box, and a won round lights the line into the next one. */
+  .bracket { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin: 8px 0 10px; }
+  .bracket .rnd { position: relative; display: flex; flex-direction: column; gap: 1px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; font-size: 11px; color: var(--dim); background: rgba(255,255,255,.03); }
+  .bracket .rnd + .rnd::before { content: ""; position: absolute; left: -11px; top: 50%; width: 10px; height: 1px; background: var(--line); }
+  .bracket .rnd b { color: var(--fg); font: 700 14px/1.1 var(--display); letter-spacing: .02em; }
+  .bracket .rnd span:last-child { font-weight: 600; margin-top: 2px; }
+  .bracket .rnd.now { border-color: var(--blue); box-shadow: inset 0 0 0 1px var(--blue); } .bracket .rnd.now span:last-child { color: var(--blue); }
+  .bracket .rnd.won { border-color: rgba(65,224,127,.6); background: rgba(65,224,127,.1); } .bracket .rnd.won span:last-child { color: var(--ok); } .bracket .rnd.won + .rnd::before { background: var(--ok); }
+  .bracket .rnd.lost { border-color: rgba(239,74,60,.7); background: rgba(239,74,60,.12); } .bracket .rnd.lost span:last-child { color: #ff8a80; }
+  #tourbox .bracket { grid-template-columns: repeat(2, 1fr); } #tourbox .bracket .rnd::before { display: none; }
+  .tourmsg { text-align: center; font: 800 22px/1.15 var(--display); letter-spacing: .02em; margin: 2px 0 0; }
   #final .body { padding: 8px 12px 12px; } #final .btns { display: flex; gap: 8px; margin-top: 8px; } #final .btns button { margin: 0; }
   label { display: flex; justify-content: space-between; align-items: center; margin: 5px 0; color: var(--dim); }
-  select, button { background: #232831; color: var(--fg); border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; font: inherit; }
-  button { cursor: pointer; width: 100%; margin-top: 6px; } button.primary { background: var(--ok); color: #0b1a10; border-color: var(--ok); font-weight: 700; }
+  select, button { background: #232831; color: var(--fg); border: 1px solid var(--line); border-radius: 6px; padding: 5px 9px; font: inherit; transition: background-color .15s ease-out, border-color .15s ease-out; }
+  button { cursor: pointer; width: 100%; margin-top: 6px; } button:hover:not(:disabled) { background: #2d333e; } button:disabled, select:disabled { opacity: .5; cursor: default; }
+  button.primary { background: var(--ok); color: #0b1a10; border-color: var(--ok); font-weight: 700; } button.primary:hover:not(:disabled) { background: #6be89b; }
+  :focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; } select:hover:not(:disabled) { border-color: rgba(255,255,255,.25); }
+  kbd { font: 600 11px var(--mono); padding: 1px 6px; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; color: var(--dim); }
   textarea { width: 100%; background: #232831; color: var(--fg); border: 1px solid var(--line); border-radius: 6px; padding: 6px; font: 12px/1.35 inherit; resize: vertical; }
   /* The game setup and the help open as modals from the control bar, over a scrim that closes them. */
   .modal { position: fixed; inset: 0; z-index: 8; display: flex; align-items: flex-start; justify-content: center; padding-top: 72px; background: rgba(0,0,0,.35); }
@@ -44,10 +68,22 @@
   .keys { color: var(--dim); font-size: 12px; line-height: 1.6; } .keys b { color: var(--fg); font-weight: 600; } .keys.grid { display: grid; grid-template-columns: max-content 1fr; column-gap: 10px; }
   #pad { color: var(--dim); font-size: 12px; margin-top: 4px; } .links { margin-top: 12px; font-size: 12px; } .links a { color: var(--fg); }
   /* Toasts: referee calls, rule messages, and the field position of a click. Each one fades after 4 s. */
-  #toasts { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); z-index: 9; display: flex; flex-direction: column; align-items: center; gap: 6px; pointer-events: none; }
-  #toasts div { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 6px 12px; backdrop-filter: blur(8px); white-space: nowrap; transition: opacity .5s; }
+  #toasts { position: fixed; bottom: 92px; left: 50%; transform: translateX(-50%); z-index: 9; display: flex; flex-direction: column; align-items: center; gap: 6px; pointer-events: none; }
+  #toasts div { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 7px 14px; backdrop-filter: blur(8px); max-width: min(640px, calc(100vw - 32px)); text-align: center; transition: opacity .5s; }
   #toasts div.ref { border-color: #ffb74d; } #toasts div.out { opacity: 0; } body.editing #toasts { bottom: 64px; }
-  #banner { top: 42%; left: 50%; transform: translate(-50%,-50%); font-size: 18px; text-align: center; padding: 16px 26px; } #banner small { display: block; color: var(--dim); font-size: 13px; margin-top: 4px; }
+  /* The match card: what comes next, and the button that starts it. */
+  #banner { top: 42%; left: 50%; transform: translate(-50%,-50%); text-align: center; padding: 18px 28px 20px; min-width: 320px; max-width: min(520px, calc(100vw - 24px)); }
+  #banner b { display: block; font: 800 40px/1.05 var(--display); letter-spacing: .01em; }
+  #banner .eyebrow { display: block; color: var(--dim); font: 700 15px/1.2 var(--display); letter-spacing: .04em; margin-bottom: 4px; }
+  #banner small { display: block; color: var(--dim); font-size: 13px; margin-top: 6px; }
+  #banner .go { display: flex; align-items: center; justify-content: center; gap: 10px; margin-top: 14px; } #banner .go button { width: auto; margin: 0; padding: 9px 20px; font-size: 14px; }
+  /* The driver HUD: the carried elements in launch order, and whether the shot preview enters the CELL. */
+  #drivehud { right: 16px; bottom: 40px; display: flex; align-items: center; gap: 14px; padding: 8px 12px; }
+  #drivehud .slots { display: flex; gap: 6px; } #drivehud .slots i { width: 18px; height: 18px; border-radius: 50%; border: 2px solid rgba(255,255,255,.25); }
+  #drivehud .slots i.pollen { background: var(--pollen); border-color: var(--pollen); } #drivehud .slots i.nred { background: #d8261c; border-color: #d8261c; } #drivehud .slots i.nblue { background: #1f4fd8; border-color: #1f4fd8; }
+  #drivehud .aim { font: 700 15px/1 var(--display); letter-spacing: .04em; padding: 5px 10px; border-radius: 4px; color: var(--dim); border: 1px solid var(--line); min-width: 92px; text-align: center; }
+  #drivehud .aim.on { background: var(--ok); border-color: var(--ok); color: #0b1a10; }
+  body.reviewing #drivehud, body.editing #drivehud { display: none !important; }
   /*
    * The control bar sits in the upper-left corner, with the score table under it. Its timeline covers the whole MATCH:
    * the recorded part fills in as the MATCH runs, and a drag back opens the review. The thumb and the marks share the
@@ -65,7 +101,7 @@
   #marks { top: 0; height: 22px; pointer-events: none; }
   #marks i { position: absolute; top: 6px; width: 10px; height: 10px; margin-left: -5px; border-radius: 50%; border: 2px solid #14171c; cursor: pointer; pointer-events: auto; }
   #marks i.sys { top: 5px; width: 2px; height: 12px; margin-left: -1px; border: 0; border-radius: 1px; background: #c2c8d2; pointer-events: none; }
-  #scrubtime { font: 700 11px ui-monospace, SFMono-Regular, Menlo, monospace; white-space: nowrap; }
+  #scrubtime { font: 700 11px var(--mono); white-space: nowrap; }
   #tlive { width: auto; margin: 0 0 0 8px; padding: 1px 8px; border-radius: 999px; font-size: 11px; display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
   #tlive i { width: 7px; height: 7px; border-radius: 50%; background: var(--red); } #tlive.behind i { background: var(--dim); }
   button.ib { width: 28px; height: 28px; margin: 0; padding: 0; display: inline-flex; align-items: center; justify-content: center; background: transparent; border-color: transparent; }
@@ -78,21 +114,27 @@
    * the banner center in the space right of the bar: (312 px + 12 px) / 2 = 162 px right of the window's center.
    */
   body.narrow #top, body.narrow #banner { left: calc(50% + 162px); } body.narrow #banner { max-width: calc(100vw - 348px); }
-  @media (max-width: 820px) { #top { transform: translateX(-50%) scale(.8); transform-origin: top center; } } #rspeed { width: 56px; padding: 3px 4px; } #rspeed:disabled { opacity: .45; }
+  @media (max-width: 820px) { #top { transform: translateX(-50%) scale(.8); transform-origin: top center; } }
+  /* On a phone there is no room beside the control bar: the scoreboard goes to the bottom, and the match card centers. */
+  @media (max-width: 640px) {
+    body.narrow #top, body.narrow #banner, #top, #banner { left: 50%; }
+    #top { top: auto; bottom: 34px; transform: translateX(-50%) scale(.72); transform-origin: bottom center; }
+    #banner, body.narrow #banner { min-width: 0; width: calc(100vw - 24px); max-width: none; }
+  } #rspeed { width: 56px; padding: 3px 4px; } #rspeed:disabled { opacity: .45; }
   input[type=text] { background: #232831; color: var(--fg); border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; font: inherit; }
   #aenew { top: 84px; left: 50%; transform: translateX(-50%); width: 340px; z-index: 6; } #aenew h2 { color: var(--fg); } #aenew label { gap: 8px; } #aenew input, #aenew select { width: 220px; }
   #aenew .btns { display: flex; gap: 6px; margin-top: 8px; } #aenew .btns button { margin: 0; } #aeerr { color: #ff8a80; font-size: 12px; min-height: 16px; margin-top: 4px; }
   #aestatus { color: var(--dim); font-size: 11px; } #aestatus.warn { color: #ffb74d; }
   #aesnaprow { margin: 0; gap: 4px; white-space: nowrap; color: var(--fg); } #aesnaprow input { margin: 0; }
-  #aehover { position: fixed; z-index: 7; pointer-events: none; background: #2a2340; color: #e1bee7; border: 1px solid #7e57c2; border-radius: 4px; padding: 1px 6px; font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; }
+  #aehover { position: fixed; z-index: 7; pointer-events: none; background: #2a2340; color: #e1bee7; border: 1px solid #7e57c2; border-radius: 4px; padding: 1px 6px; font: 11px var(--mono); }
   #aeinsp { top: 12px; right: 12px; width: 310px; bottom: 70px; overflow-y: auto; z-index: 5; font-size: 12px; padding: 8px 10px; }
   #aeinsp h3 { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--dim); margin: 10px 0 4px; } #aeinsp section:first-child h3 { margin-top: 0; }
-  #aeinsp p { margin: 0 0 6px; } #aeinsp code { font: 11.5px ui-monospace, SFMono-Regular, Menlo, monospace; }
+  #aeinsp p { margin: 0 0 6px; } #aeinsp code { font: 11.5px var(--mono); }
   #aeinsp input, #aeinsp select { width: 100%; box-sizing: border-box; margin: 2px 0 0; padding: 3px 6px; font-size: 12px; }
-  #aeinsp input.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; } #aeinsp .bad { border-color: #ff8a80; }
+  #aeinsp input.mono { font-family: var(--mono); } #aeinsp .bad { border-color: #ff8a80; }
   #aeinsp input:disabled, #aeinsp select:disabled { opacity: .75; }
   #aeinsp .ai-hint, #aeinsp .ai-meta, #aeinsp .ai-doc { color: var(--dim); font-size: 11px; } #aeinsp .ai-doc { margin-top: 2px; }
-  #aeinsp .ai-node { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; margin-bottom: 4px; } #aeinsp .ai-node b { color: #ffd54f; }
+  #aeinsp .ai-node { font-family: var(--mono); margin-bottom: 4px; } #aeinsp .ai-node b { color: #ffd54f; }
   #aeinsp .ai-field { margin: 8px 0; } #aeinsp .ai-req { color: #ffb74d; font-size: 10.5px; } #aeinsp .ai-ro { padding: 3px 0; color: var(--dim); }
   #aeinsp .ai-err { color: #ff8a80; font-size: 11.5px; margin-top: 2px; }
   #aeinsp .ai-problems { border: 1px solid #ff8a80; border-radius: 8px; padding: 6px 8px; } #aeinsp .ai-problems h3 { color: #ff8a80; }
@@ -112,8 +154,8 @@
   #botlist { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: repeat(2, auto); grid-auto-flow: column; gap: 8px; margin-top: 6px; }
   #botlist .bot { border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px 7px; background: rgba(255,255,255,.03); cursor: pointer; }
   #botlist .bot.red { border-color: rgba(239,74,60,.45); } #botlist .bot.blue { border-color: rgba(77,125,255,.5); } #botlist .bot:hover { background: rgba(255,255,255,.07); } body.playing #botlist .bot { cursor: default; }
-  .bothead { display: flex; align-items: center; gap: 6px; } .bothead b { min-width: 52px; font: 700 12px ui-monospace, SFMono-Regular, Menlo, monospace; padding: 1px 5px; border-radius: 4px; color: #fff; text-align: center; }
-  .bothead span { flex: 1; color: var(--dim); font-size: 11px; } .botdesc { margin-top: 5px; font-size: 12px; line-height: 1.45; color: var(--dim); } .botdesc div:first-child { color: var(--fg); }
+  .bothead { display: flex; align-items: center; gap: 6px; } .bothead b { min-width: 52px; font: 600 12px var(--mono); padding: 1px 5px; border-radius: 4px; color: #fff; text-align: center; }
+  .bothead span:not(.you) { flex: 1; color: var(--dim); font-size: 11px; } .botdesc { margin-top: 5px; font-size: 12px; line-height: 1.45; color: var(--dim); } .botdesc div:first-child { color: var(--fg); }
   @media (max-width: 520px) { #botlist { grid-template-columns: minmax(0, 1fr); grid-template-rows: none; grid-auto-flow: row; } }
   button.gear { width: 22px; height: 22px; margin: 0; padding: 0; line-height: 1; border-radius: 5px; font-size: 14px; display: inline-flex; align-items: center; justify-content: center; } #top .teams div { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin: 1px 0; }
   #top .teams button.gear { background: rgba(0,0,0,.25); border-color: rgba(255,255,255,.25); color: #fff; width: 18px; height: 18px; font-size: 12px; }
@@ -123,10 +165,10 @@
   input[type=number] { background: #232831; color: var(--fg); border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; font: inherit; }
   .errhead { display: flex; justify-content: space-between; align-items: center; margin: 8px 0 2px; color: var(--fg); font-size: 12px; } .chips { display: flex; gap: 4px; } .chips button { width: auto; margin: 0; padding: 2px 9px; border-radius: 999px; font-size: 11px; }
   /* The tree view: the chosen robot's behavior tree as an outline. It sits on the left, under the control bar and the score. */
-  #tree { left: 12px; width: 360px; display: flex; flex-direction: column; font: 11.5px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; padding: 8px 10px; }
+  #tree { left: 12px; width: 360px; display: flex; flex-direction: column; font: 11.5px/1.45 var(--mono); padding: 8px 10px; }
   #treebody { flex: 1; min-height: 0; overflow: auto; }
-  #tree h2 { font-family: ui-sans-serif, system-ui, sans-serif; margin-bottom: 4px; } #treebots { display: flex; gap: 4px; margin-bottom: 6px; }
-  #treebots button { width: auto; margin: 0; padding: 1px 7px; font: 700 11px ui-monospace, SFMono-Regular, Menlo, monospace; } #treebots button.on { background: var(--fg); color: #14171c; }
+  #tree h2 { font-family: var(--ui); margin-bottom: 4px; } #treebots { display: flex; gap: 4px; margin-bottom: 6px; }
+  #treebots button { width: auto; margin: 0; padding: 1px 7px; font: 700 11px var(--mono); } #treebots button.on { background: var(--fg); color: #14171c; }
   .tv { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--dim); border-radius: 4px; padding-right: 4px; }
   .tv b { color: var(--fg); font-weight: 600; } .tv b.leaf { color: var(--pollen); } .tv i { color: #c2c8d2; font-style: normal; } .tv .d { color: #7e8794; } .tv em { font-style: normal; font-size: 10.5px; }
   .tv.run { background: rgba(65,224,127,.18); } .tv.run em { color: var(--ok); font-weight: 700; }
@@ -142,14 +184,16 @@
   body.editing #banner, body.editing #final { display: none !important; }
   .hidden { display: none !important; }
   /* Persistent controller/keyboard status bar at the bottom of the screen */
-  #statusbar { position: fixed; bottom: 0; left: 0; right: 0; z-index: 10; display: flex; gap: 12px; align-items: center; padding: 4px 14px; background: rgba(10,12,16,.88); border-top: 1px solid var(--line); backdrop-filter: blur(6px); font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--dim); flex-wrap: wrap; }
-  #statusbar .sb-item { display: flex; align-items: center; gap: 5px; white-space: nowrap; }
-  #statusbar .sb-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
-  #statusbar .ok { color: var(--ok); } #statusbar .warn { color: #ffb74d; }
-  #statusbar .dot-ok { background: var(--ok); } #statusbar .dot-off { background: #3a3f4a; } #statusbar .dot-kb { background: #4d7dff; }
+  #statusbar { position: fixed; bottom: 0; left: 0; right: 0; z-index: 10; display: flex; gap: 18px; align-items: center; padding: 5px 14px; background: rgba(10,12,16,.9); border-top: 1px solid var(--line); backdrop-filter: blur(6px); font: 12px/1.4 var(--ui); color: var(--dim); flex-wrap: wrap; }
+  #statusbar .sb-item { display: flex; align-items: center; gap: 6px; white-space: nowrap; } #statusbar .sb-item span { color: var(--dim); }
+  #statusbar .sb-item i { width: 8px; height: 8px; border-radius: 50%; background: #3a3f4a; } #statusbar .sb-item.on { color: var(--fg); } #statusbar .sb-item.on i { background: var(--ok); }
   body.editing #statusbar { bottom: 54px; }
   /* The AUTO editor's step panels sit above the status bar, so that no bar clips them. */
-  #stepSettings { position: fixed; right: 12px; bottom: 92px; width: 310px; z-index: 12; font-size: 12px; padding: 10px 12px; }
+  #stepSettings { position: fixed; right: 12px; bottom: 92px; width: 330px; z-index: 12; font-size: 12px; padding: 10px 12px; }
+  #stepSettings .ss-note { color: var(--dim); font-size: 11px; margin: 0 0 8px; }
+  #stepSettings .ss-row { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; margin-bottom: 8px; } #stepSettings .ss-row:last-child { margin-bottom: 0; }
+  #stepSettings .ss-row label { display: inline; margin: 0; min-width: 44px; color: var(--fg); font-weight: 600; } #stepSettings .ss-row span { color: var(--dim); font-size: 11px; }
+  #stepSettings select { flex: 1; font-size: 12px; } #stepSettings input[type=number] { width: 58px; font-size: 12px; padding: 3px 6px; }
   #stepOrder { position: fixed; right: 330px; bottom: 92px; width: 220px; z-index: 12; font-size: 12px; padding: 8px 10px; max-height: calc(100vh - 132px); overflow-y: auto; }
 </style>
 </head>
@@ -173,6 +217,7 @@
     <span class="dv"></span>
     <button id="tsetup" class="ib" title="Game setup" aria-label="Game setup"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.671 4.136a2.34 2.34 0 0 1 4.659 0 2.34 2.34 0 0 0 3.319 1.915 2.34 2.34 0 0 1 2.33 4.033 2.34 2.34 0 0 0 0 3.831 2.34 2.34 0 0 1-2.33 4.033 2.34 2.34 0 0 0-3.319 1.915 2.34 2.34 0 0 1-4.659 0 2.34 2.34 0 0 0-3.32-1.915 2.34 2.34 0 0 1-2.33-4.033 2.34 2.34 0 0 0 0-3.831A2.34 2.34 0 0 1 6.35 6.051a2.34 2.34 0 0 0 3.319-1.915"/><circle cx="12" cy="12" r="3"/></svg></button>
     <button id="thelp" class="ib" title="Help" aria-label="Help"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg></button>
+    <button id="tvr" class="ib hidden" title="Drive from the alliance area in a VR headset" aria-label="Enter VR"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 8a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-3.5l-2.2-2.6a1.7 1.7 0 0 0-2.6 0L8.5 17H5a2 2 0 0 1-2-2z"/><circle cx="8" cy="11.5" r="1.5"/><circle cx="16" cy="11.5" r="1.5"/></svg></button>
     <button id="tscore" class="ib" title="Hide the score" aria-label="Hide the score" aria-expanded="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>
   </div>
 </div>
@@ -183,14 +228,18 @@
   <div class="cols"><div>
     <h2>Match</h2>
     <label title="Which periods the MATCH runs: AUTO and TELEOP with the transition between them, or one period alone.">Periods <select id="mode"><option value="full">Full 2:30</option><option value="teleop">TELEOP only 2:00</option><option value="auto">AUTO only 0:30</option><option value="practice">Practice (unlimited)</option></select></label>
-    <label title="How many AI opponent robots appear on the field alongside your robot.">Opponents <select id="opponents"><option value="0">0 — solo practice</option><option value="1">1 — red partner only</option><option value="2">2 — red + one blue</option><option value="3" selected>3 — full field</option></select></label>
+    <label title="How many AI opponent robots appear on the field alongside your robot.">Opponents <select id="opponents"><option value="0">None, solo practice</option><option value="1">Red partner only</option><option value="2">Red partner and one blue</option><option value="3" selected>Full field</option></select></label>
     <label title="In a playoff MATCH there are no ranking points, so the planner maximizes points alone.">Stage <select id="stage"><option value="qual">Qualification</option><option value="playoff">Playoff</option></select></label>
+    <h2>Tournament</h2>
+    <div style="color:var(--dim);font-size:11px;margin-bottom:4px">Four full playoff MATCHES against a full field, single elimination. Each blue alliance is harder than the last.</div>
+    <div class="btns"><button id="tourstart">Start tournament</button></div>
+    <div id="tourbox"></div>
     <h2>This match</h2>
     <div id="nsaved" style="color:var(--dim);font-size:11px;margin-bottom:4px">Settings save automatically.</div>
     <div class="btns"><button id="nexport" title="Downloads the notes as Markdown and the match trace as JSON.">Export match</button><button id="ncopy" title="Copies the path of the annotation file in the repository.">Copy notes path</button></div>
   </div><div>
     <h2>Options</h2>
-    <label>Camera <select id="camera"><option value="driver">Driver station</option><option value="overhead">Overhead</option><option value="chase">Chase</option><option value="audience">Audience</option></select></label>
+    <label>Camera <select id="camera"><option value="chase">Third person</option><option value="driver">Driver station</option><option value="overhead">Overhead</option><option value="audience">Audience</option></select></label>
     <label>Units <select id="units"><option value="metric">Metric</option><option value="us">US</option></select></label>
     <label>Sound <select id="sound"><option value="on">On</option><option value="off">Off</option></select></label>
     <label title="Shows a robot's behavior tree: the running nodes, and each other node's last result. It follows the review cursor too.">Tree view <select id="treeview"><option value="off">Off</option><option value="on">On</option></select></label>
@@ -212,6 +261,8 @@
   <label id="bcslewrow">Turret turn rate, °/s <input id="bcturretslew" type="number" min="10" max="3600" step="10" placeholder="instant"></label>
   <label>AUTO plan <select id="bcauto"></select></label>
   <button id="bcedit" type="button" title="Opens the AUTO editor on this robot. Plans are written in red's frame, and blue robots run them rotated 180°.">Edit AUTO paths</button>
+  <button id="bcpedro" type="button" title="Reads a Pedro Pathing OpMode (.java) into a new AUTO plan for this robot: its paths, and its intake, launches, and waits. You can also drop the file on the page.">Import Pedro Pathing auto</button>
+  <input id="bcpedrofile" type="file" accept=".java" hidden>
   <label id="bcplanrow">TELEOP plan <select id="bcplan"><option value="0">Keep tipping</option><option value="30">FLOWERS from 30 s</option><option value="45">FLOWERS from 45 s</option><option value="66">FLOWERS from 66 s</option></select></label>
   <div class="errhead"><span title="How much one shot differs from the next, as one standard deviation. Measure it: launch 20 elements from one spot.">Launcher error, 1 SD</span><span class="chips"><button type="button" data-err="1">1x</button><button type="button" data-err="3">3x</button><button type="button" data-err="5">5x</button></span></div>
   <label>Elevation, ° <input id="bcelev" type="number" min="0" max="15" step="0.1"></label>
@@ -228,10 +279,10 @@
 </div>
 <div id="tree" class="panel hidden"><h2 id="treehead"></h2><div id="treebots"></div><div id="treebody"></div></div>
 <div id="helpbox" class="modal hidden"><div class="panel" role="dialog" aria-modal="true" aria-labelledby="helphead" style="width:640px;max-width:calc(100vw - 24px);max-height:calc(100vh - 88px);overflow-y:auto">
-  <div class="mhead"><h2 id="helphead">Help — BIOBUZZ Simulator (Team 32294)</h2><button class="ib" data-close title="Close (Esc)" aria-label="Close"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button></div>
+  <div class="mhead"><h2 id="helphead">Help</h2><button class="ib" data-close title="Close (Esc)" aria-label="Close"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button></div>
 
   <h2>Quick start</h2>
-  <div class="keys">1. Open <b>Game Setup</b> (⚙ in the control bar) and pick your <b>Periods</b> and <b>Opponents</b>. 2. Your robot is <b>32294 H</b> (red alliance, right start). Set its <b>Driver</b> to Controller or Keyboard in the gear ⚙ config. 3. Press <b>Play</b> or <b>Space</b> to start. The other robots are driven by the AI planner.</div>
+  <div class="keys">1. Open <b>Game Setup</b> (⚙ in the control bar) and pick your <b>Periods</b> and <b>Opponents</b>. 2. Your robot is <b>32294</b>, marked <span class="you">You</span> (red alliance, right start). It drives with a controller, or with the keyboard when no controller is connected. 3. Press <b>Play</b> or <b>Space</b> to start. The other robots are driven by the AI planner.</div>
 
   <div class="cols"><div>
     <h2>Controller (gamepad)</h2>
@@ -259,7 +310,7 @@
       <b>← → arrows</b><span>Rotate turret left / right</span>
       <b>Z</b><span>Place in FLOWER</span>
     </div>
-    <p style="color:var(--dim);font-size:11px;margin:4px 0 0">Set Driver to <b style="color:var(--fg)">Keyboard (WASD)</b> in the robot config (gear icon).</p>
+    <p style="color:var(--dim);font-size:11px;margin:4px 0 0">The keyboard drives when no controller is connected. To keep it with a controller plugged in, set Driver to <b style="color:var(--fg)">Keyboard (WASD)</b> in the robot config (gear icon).</p>
   </div><div>
     <h2>App keys</h2>
     <div class="keys grid">
@@ -271,7 +322,7 @@
       <b>V</b><span>Open the review</span>
       <b>C</b><span>Change the camera</span>
       <b>Esc</b><span>Close any popup</span>
-      <b>Rebind</b><span>Click <b>Configure Key Bindings</b> at the bottom of this help, then a row, then press a key</span>
+      <b>Rebind</b><span>Click <b>Key bindings</b> at the bottom of this help, then a row, then press a key</span>
     </div>
 
     <h2>While paused</h2>
@@ -280,7 +331,7 @@
       <b>↑ ↓</b><span>Zoom in / out</span>
       <b>Gear icon ⚙</b><span>Edit robot config mid-match</span>
     </div>
-    <p style="color:var(--dim);font-size:11px;margin:4px 0 0">Changing a setting while paused keeps the match paused — press Play to continue, or Reset to apply changes that need a full rebuild.</p>
+    <p style="color:var(--dim);font-size:11px;margin:4px 0 0">Changing a setting while paused keeps the MATCH paused. Press Play to continue, or Reset to apply changes that need a full rebuild.</p>
   </div></div>
 
   <h2>Mouse</h2>
@@ -291,10 +342,17 @@
     <b>Click a robot (review)</b><span>Add a note at the current cursor position</span>
   </div>
 
+  <h2>Third-person camera (mouse)</h2>
+  <div class="keys grid">
+    <b>Left drag</b><span>Look around the robot. The camera swings back behind the shooter when you let go.</span>
+    <b>Scroll wheel</b><span>Move the camera in or out</span>
+  </div>
+  <p style="color:var(--dim);font-size:11px;margin:4px 0 0">The camera sits behind where your shots go: the turret's aim, so the turret keys swing it. With field-centric sticks, pushing up drives away from the camera.</p>
+
   <h2>Review camera (mouse)</h2>
   <div class="keys grid">
-    <b>Left drag</b><span>Orbit — rotate around the field from any angle</span>
-    <b>Right drag</b><span>Pan — move the look-at point</span>
+    <b>Left drag</b><span>Orbit around the FIELD</span>
+    <b>Right drag</b><span>Move the point the camera looks at</span>
     <b>Scroll wheel</b><span>Zoom in / out</span>
     <b>← → ↑ ↓</b><span>Pan the look-at point with the keyboard</span>
   </div>
@@ -305,11 +363,13 @@
     <b>Periods</b><span>Full 2:30 · TELEOP only 2:00 · AUTO only 0:30 · Practice (unlimited)</span>
     <b>Opponents</b><span>0 (solo) · 1 (red partner) · 2 (+one blue) · 3 (full field)</span>
     <b>Stage</b><span>Qualification, with ranking points, or Playoff, without them</span>
-    <b>Camera</b><span>Driver station · Overhead · Chase · Audience — or press C to cycle through them</span>
+    <b>Tournament</b><span>Four playoff rounds against the planner. Each round's blue alliance is a level harder: Rookie, Regular, Veteran, World class. A loss ends the run, and a tie replays the round.</span>
+    <b>VR</b><span>In a Quest browser, the headset button puts you in the red alliance area. Left stick drives, right stick turns, left trigger intakes, right trigger and grip launch, A starts.</span>
+    <b>Camera</b><span>Third person, driver station, overhead, or audience. C cycles through them.</span>
     <b>Units</b><span>Metric or US, for every size, speed, and coordinate that the page shows</span>
-    <b>Sound</b><span>On/Off — the match's sounds, such as the countdown</span>
-    <b>Shot trajectory</b><span>On/Off — shows the dotted arc predicting where your next shot lands</span>
-    <b>AUTO paths</b><span>On/Off — shows the AI's planned path on the field</span>
+    <b>Sound</b><span>The MATCH sounds, such as the countdown</span>
+    <b>Shot trajectory</b><span>The arc of your next shot. It turns green when the shot enters the CELL.</span>
+    <b>AUTO paths</b><span>The planner's path on the FIELD</span>
     <b>Referee</b><span>Enables/disables the PIN foul (G421) rule</span>
     <b>Tree view</b><span>Shows the AI behaviour tree running live</span>
     <b>Export match</b><span>After a match, downloads the trace as JSON and the notes as Markdown</span>
@@ -318,33 +378,33 @@
 
   <h2>Robot config (gear ⚙ icon)</h2>
   <div class="keys grid">
-    <b>Driver</b><span>Controller · Keyboard (WASD) — only available for team 32294 (H)</span>
+    <b>Driver</b><span>Controller or keyboard. Only 32294 has a human driver.</span>
     <b>Stick frame</b><span>Field-centric (push stick = move that direction on field) or Robot-centric</span>
     <b>Shooter</b><span>Dual (by type) · Single FIFO · Catapult (all 4 at once)</span>
     <b>AUTO plan</b><span>Which path the robot runs in the 30 s AUTO period</span>
-    <b>Drive motor</b><span>RPM — faster = more speed, less torque</span>
+    <b>Drive motor</b><span>Free speed in rpm: faster means less pushing force</span>
     <b>Chassis / Mass</b><span>Size and weight affect inertia and turning</span>
-    <b>Launcher error</b><span>How accurate each shot is — 1x is realistic, 5x is very inaccurate</span>
+    <b>Launcher error</b><span>Shot-to-shot spread. 1x is the reference launcher; 5x is very loose.</span>
   </div>
-  <p style="color:var(--dim);font-size:11px;margin:4px 0 0">AI robots (B badge) also have: Defense policy, TELEOP plan (when to switch to FLOWER work), and intake success rate.</p>
+  <p style="color:var(--dim);font-size:11px;margin:4px 0 0">Robots that the planner drives also have: Defense policy, TELEOP plan (when to switch to FLOWER work), and intake success rate.</p>
 
   <h2>The turret (team 32294)</h2>
-  <div class="keys">Your robot always has a full 360° turret. It starts aimed straight forward. Use ← → arrows (keyboard) or D-pad (controller) to rotate it — right arrow turns clockwise, left turns counterclockwise, at 180°/s. The dotted arc shows where the next shot will land. The turret holds its angle when you release the keys. With the planner or an AUTO plan driving, the turret aims itself at the raised CELL, so the robot shoots correctly from any heading — you only steer it yourself.</div>
+  <div class="keys">Your robot always has a full 360° turret. It starts aimed straight forward. Use ← → arrows (keyboard) or D-pad (controller) to turn it at 180°/s: right is clockwise. The arc shows where the next shot lands, and the third-person camera swings with the turret. The turret holds its angle when you release the keys. With the planner or an AUTO plan driving, the turret aims itself at the raised CELL, so it shoots from any heading.</div>
 
   <h2>Intake</h2>
   <div class="keys">Hold ↓ (keyboard) or LT (controller) to run the intake. Release to stop. The AI robots intake automatically. Picking up opponent NECTAR (blue balls) is allowed but triggers a G408 minor foul (+5 pts to the opponent).</div>
 
   <h2>Scoreboard</h2>
-  <div class="keys"><b style="color:var(--ok)">H</b> = human-driven (team 32294). <b style="color:var(--dim)">B</b> = AI robot (bot). The gear icon ⚙ opens that robot's config. During a match the gear icons are hidden — pause first to access them.</div>
+  <div class="keys"><span class="you">You</span> marks your robot; the planner drives the others. A gear opens a robot's config. The gears hide during a MATCH: pause to get them back.</div>
 
   <h2>Status bar</h2>
   <div class="keys">The bar at the bottom of the screen shows the controller's name and whether it is connected, and which robot the keyboard drives. A blue dot means keys are held right now. It tucks itself above the AUTO editor's bar while you edit a plan.</div>
 
   <h2>Timeline and review</h2>
-  <div class="keys">The scrubber bar shows the full match. Gray ticks = MATCH start, TELEOP start, FLOWERS open (1:00), endgame (0:20), and MATCH end. Colored dots = notes. Drag the thumb back during a live match to review — the match waits. Press V or click the Review button to enter full review mode with free-look camera. Press Go Live or R to return.</div>
+  <div class="keys">The scrubber bar shows the full match. Gray ticks = MATCH start, TELEOP start, FLOWERS open (1:00), endgame (0:20), and MATCH end. Colored dots = notes. Drag the thumb back during a live MATCH to review it while the MATCH waits. Press V or click the Review button to enter full review mode with free-look camera. Press Go Live or R to return.</div>
 
   <h2 id="help-autoedit">AUTO path editor</h2>
-  <div class="keys">Your robot runs an AI plan during the 30 s AUTO. To edit it: open <b>Game Setup → Edit AUTO paths</b>, or click the gear ⚙ on 32294, choose a plan, and click <b>Edit AUTO paths</b>. The <b style="font-weight:700">?</b> button in the editor bar opens this help without leaving the editor.</div>
+  <div class="keys">Your robot runs an AI plan during the 30 s AUTO. To edit it: open <b>Game Setup → Edit AUTO paths</b>, or click the gear ⚙ on 32294, choose a plan, and click <b>Edit AUTO paths</b>. The <b style="font-weight:700">?</b> button in the editor bar opens this help without leaving the editor. To bring in a Pedro Pathing auto, click <b>Import Pedro Pathing auto</b> in the robot config and pick the OpMode's .java file: its paths, intake, launches, and waits become a new plan. You can also drop the file on the page.</div>
   <div class="keys grid" style="margin-top:6px">
     <b>Orange dots</b><span>Each dot is a pose (position + heading). Drag to move it.</span>
     <b>Arrow on dot</b><span>The robot's heading at that position. Drag the tip to rotate.</span>
@@ -359,7 +419,7 @@
     <b>Delete plan</b><span>Removes your custom plan</span>
     <b>Snap</b><span>Snaps drags to a 1-inch grid and turns to 5°. Hold Alt, or Option on a Mac, to do the opposite.</span>
   </div>
-  <p style="color:var(--dim);font-size:11px;margin:6px 0 0">The editor covers most plans. For full control — waypoints, waits, conditions, and the camera's sightings — see the JSON reference below.</p>
+  <p style="color:var(--dim);font-size:11px;margin:6px 0 0">The editor covers most plans. For waypoints, waits, conditions, and the camera's sightings, see the JSON reference below.</p>
 
   <h2>AUTO path JSON reference</h2>
   <div class="keys">A path is a JSON file with four sections: <b>defs</b> (named positions), <b>root</b> (the steps), and a few header fields. All positions use red-alliance coordinates: x = red wall (−) to blue wall (+), y = audience (−) to rear (+), headingDeg = degrees CCW from +x axis.</div>
@@ -369,8 +429,8 @@
     <b>field.hiveX</b><span>X of the HIVE pivot (−0.32 m)</span>
     <b>field.half</b><span>Half the field (1.79 m)</span>
     <b>field.flowerFar / Near</b><span>Flower X and Y distances from center</span>
-    <b>bots.me.dimensions.length</b><span>Robot length — use for wall offset math</span>
-    <b>clock.remaining</b><span>Seconds left — use in waitUntil conditions</span>
+    <b>bots.me.dimensions.length</b><span>Robot length, for offsets from a wall</span>
+    <b>clock.remaining</b><span>Seconds left, for waitUntil conditions</span>
   </div>
   <p style="color:var(--dim);font-size:11px;margin:6px 0 0"><b>Actions (ref):</b></p>
   <div class="keys grid">
@@ -387,12 +447,12 @@
     <b>waitUntil</b><span>Wait for condition. Params: condition (expression), timeoutSec</span>
     <b>vision.waitTip</b><span>Wait for HIVE to tip. Params: cell (rear/audience), timeoutSec</span>
   </div>
-  <p style="color:var(--dim);font-size:11px;margin:6px 0 0"><b>Structure keywords:</b> <code>sequence</code> runs children in order. <code>parallel policy:any</code> runs all children at once and stops when any one finishes — use this to run the intake alongside a drive step.</p>
+  <p style="color:var(--dim);font-size:11px;margin:6px 0 0"><b>Structure keywords:</b> <code>sequence</code> runs children in order. <code>parallel policy:any</code> runs all children at once and stops when any one finishes: run the intake beside a drive step this way.</p>
 
-  <div class="links" style="margin-top:12px"><button id="openkeybinds" style="width:auto;margin:0;padding:2px 10px;font-size:12px">Configure Key Bindings</button></div>
+  <div class="links" style="margin-top:12px"><button id="openkeybinds" style="width:auto;margin:0;padding:2px 10px;font-size:12px">Key bindings</button></div>
 </div></div>
 <div id="keybinds" class="modal hidden"><div class="panel" role="dialog" aria-modal="true" aria-labelledby="kbhead" style="width:340px">
-  <div class="mhead"><h2 id="kbhead">Key Bindings</h2><button class="ib" data-close title="Close (Esc)" aria-label="Close"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button></div>
+  <div class="mhead"><h2 id="kbhead">Key bindings</h2><button class="ib" data-close title="Close (Esc)" aria-label="Close"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button></div>
   <p style="color:var(--dim);font-size:11px;margin:0 0 8px">Click a row then press any key to rebind. Changes save instantly.</p>
   <table id="kbtable" style="width:100%;border-collapse:collapse;font-size:12px"></table>
   <div class="btns" style="margin-top:8px"><button id="kbreset">Reset to defaults</button></div>
@@ -421,6 +481,7 @@
   <div class="btns"><button id="aemake" class="primary">Create</button><button id="aecancel">Cancel</button></div></div>
 <div id="final" class="panel hidden"></div>
 <div id="banner" class="panel hidden"></div>
+<div id="drivehud" class="panel hidden" aria-live="polite"></div>
 <script type="module" src="/src/main.ts"></script>
 </body>
 </html>

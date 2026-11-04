@@ -195,6 +195,73 @@ The blue robots run the same AUTO trees and the same TELEOP policy as the red ro
 configs. Robots collide with each other, and each planner treats the other robots as obstacles. To compare
 scripted strategies against the blue alliance, run `npx tsx scripts/sweep.ts`.
 
+**Tournament** in the game setup plays a single-elimination bracket of four full playoff MATCHES: the Round of 16, a
+Quarterfinal, a Semifinal, and the Final. Your alliance is red. `src/tournament.ts` sets the blue robots for each
+round, one level harder each time: Rookie (baseline robots at 312 rpm, 4x launcher error, 70% intake), Regular (2x
+error, 85% intake), Veteran (the meta build with the reference launcher), and World class (the meta build on a turret,
+half the error, and opportunistic defense). A win advances, a loss ends the run, and a tie replays the round. The
+robot configs keep their own blue setups for MATCHES outside the tournament.
+
+### Third-person camera
+
+The default camera sits behind the focus robot and looks where its shots go: along the turret, or out of the end that
+launches. It trails the aim with a time constant of 1/8 s. A left drag looks around the robot and eases back when let
+go, and the wheel moves the camera in and out. With field-centric sticks, the sticks steer relative to this camera, so
+pushing up drives away from it. In TELEOP, a HUD at the lower right shows the elements in the transfer, in launch
+order, and whether the shot preview enters the CELL.
+
+### Pedro Pathing import
+
+**Import Pedro Pathing auto** in a red robot's config reads a Pedro Pathing OpMode's `.java` file into a new AUTO
+tree. `src/auto/pedro.ts` evaluates the file's declarations of numbers, `Pose`s, and paths, with no Java compiler. It
+reads Pedro 2.x (`line`, `curve`, `.linear`, `.constant`, `.tangent`, `.reversed`) and Pedro 1.x (`BezierLine`,
+`BezierCurve`, `Point`, `pathBuilder().addPath(...)` and the `set...HeadingInterpolation` calls). The tree drives to the
+OpMode's start pose with the path planner, and then follows each path with `drive.followPath`, in the order that the
+source calls `follow` or `followPath`. A curve becomes six waypoints. Pedro's 144 in. FIELD maps onto FIELD meters
+about its center, and a source whose start pose is on the blue half is rotated 180° into red's frame. Dropping a
+`.java` file on the page imports it too.
+
+It also reads the mechanism calls, by their names, in source order. A call on an intake, roller, or collector
+(`intake.setPower(1)`, `robot.startIntake()`) turns the intake on, and `stop`, `off`, `reverse`, or a power of 0 or less
+turns it off: the paths and waits while it runs go in a `parallel` with `intake.run`. An intake started right after a
+`follow` runs during that path. A launch (`shoot`, `fire`, `launch`, `kick`, `feed`, or a feeder or kicker set to run)
+becomes `shooter.shoot`, which empties the transfer. A flywheel's `setVelocity` isn't a launch. `sleep(ms)`, FTCLib's
+`WaitCommand(ms)`, NextFTC's `Delay(s)`, and a timer compared alone in a condition
+(`pathTimer.getElapsedTimeSeconds() > 1.5`) become `wait`; a timer beside `isBusy()` is a timeout and is skipped. The
+OpMode's own helper methods, path callbacks (`addParametricCallback`), and command lambdas are read too.
+
+### Platforms
+
+One web page serves every platform, so a fix lands everywhere at once:
+
+- **Browser** on Windows, macOS, Linux, ChromeOS, and tablets.
+- **Installed app.** `public/manifest.webmanifest` and the service worker `public/sw.js` make the built site installable
+  from Chrome, Edge, or the Quest browser, with its own window and icon, and working offline after one visit. The dev
+  server doesn't register the worker; `npm run preview` does.
+- **Standalone VR** on a Quest 2 or 3, in the Quest browser, through WebXR. See the next section.
+- **PC VR.** Chrome and Edge on Windows run the same WebXR session on a headset tethered by Quest Link, Air Link, or
+  SteamVR.
+- **Electron**, `npm run app`, for working on the desktop app. Electron's WebXR support is experimental, so VR goes
+  through a browser instead.
+
+A native build in Unity or Godot would need the physics, the planner, and the behavior trees written again. The Quest
+Store also takes an installed web app, packaged with Meta's PWA tools, if the team wants a store listing later.
+
+### VR driver station
+
+In a browser with WebXR, such as the Meta Quest 2 or 3 browser, the headset button in the transport bar starts a VR
+session. You stand in the red alliance area, 0.7 m behind the ALLIANCE wall, as a drive team does, and drive 32294 with
+the headset's controllers; a scoreboard hangs over the far side of the FIELD. The left stick drives, field-centric from
+where you stand when the robot's stick frame is FIELD, and the right stick turns. The left trigger runs the intake, the
+right trigger launches POLLEN and the right grip NECTAR, the left grip places POLLEN and X places NECTAR, Y and B turn
+the turret, and A starts the MATCH, or resets the FIELD after it. A pickup and a launch pulse the controllers.
+
+It is the same page as on a desktop, through WebXR in `src/render/view.ts` (`enterVR`) and `src/input.ts` (`xrPad`),
+so there is nothing to install. An Electron or native build would need a PC tethered by Link, or a port to a game engine.
+WebXR needs a secure page: open the deployed sim in the Quest browser, or for the dev server connect the Quest by USB with
+developer mode on, run `adb reverse tcp:5173 tcp:5173`, and open `http://localhost:5173/sim/` in the headset. On a
+desktop, Meta's Immersive Web Emulator extension stands in for a headset.
+
 ### Referee
 
 `src/ref/referee.ts` calls PINS under G421. Code keeps the facts and the clock: contact, each robot's speed and

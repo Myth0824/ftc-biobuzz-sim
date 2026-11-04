@@ -16,6 +16,9 @@
     "app": "node electron/start.mjs",
     "build": "tsc --noEmit && vite build && node scripts/migrate-d1.mjs",
     "test": "vitest run",
+    "test:watch": "vitest",
+    "check": "tsc --noEmit",
+    "preview": "vite build && vite preview",
     "site": "python3 scripts/build-site.py"
   },
   "dependencies": {

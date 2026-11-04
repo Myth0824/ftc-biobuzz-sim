@@ -63,8 +63,18 @@ function treeCatalog(): Plugin {
   };
 }
 
+/** Lists the sound files in public/sounds/ as `virtual:sounds`, so the page loads the ones there without probing for each cue. */
+function soundList(): Plugin {
+  const id = 'virtual:sounds', dir = path.resolve('public/sounds');
+  return {
+    name: 'sound-list',
+    resolveId: s => (s === id ? `\0${id}` : null),
+    load: s => (s === `\0${id}` ? `export default ${JSON.stringify(fs.existsSync(dir) ? fs.readdirSync(dir).filter(f => /\.(wav|mp3)$/.test(f)) : [])};` : null),
+  };
+}
+
 export default defineConfig({
-  plugins: [folderIndex(), traceStore(), treeCatalog()], build: { target: 'es2022', rollupOptions: { input: { home: 'index.html', sim: 'sim/index.html' } } },
+  plugins: [folderIndex(), traceStore(), treeCatalog(), soundList()], build: { target: 'es2022', rollupOptions: { input: { home: 'index.html', sim: 'sim/index.html' } } },
   // Agent sessions can keep git worktrees in .claude/worktrees/, each with its own copy of the tests.
   test: { exclude: [...configDefaults.exclude, '.claude/**'] },
 });

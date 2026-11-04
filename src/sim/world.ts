@@ -522,6 +522,9 @@ export class Sim {
     return Math.abs(Math.atan2(Math.sin(d), Math.cos(d))) < tolRad;
   }
 
+  /** Gets where a launch goes now, as a heading in radians before launch error. The third-person camera looks along it. */
+  aimHeading(): number { return this.launchAim(); }
+
   /** Gets where a launch goes now, as a heading in radians before launch error: a turret's aim, or the shooter's facing. */
   private launchAim(pose?: { x: number; z: number; heading: number }): number {
     if (this.cfg.shooter.turret) {

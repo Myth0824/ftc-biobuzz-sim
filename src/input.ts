@@ -1,6 +1,5 @@
 import type { Inputs } from './sim/world';
 
-// ---------- configurable key bindings ----------
 export interface KeyBindings {
   forward: string; back: string; strafeLeft: string; strafeRight: string;
   turnLeft: string; turnRight: string;
@@ -48,20 +47,19 @@ export function codeLabel(code: string): string {
   return CODE_LABELS[code] ?? code.replace(/^Key/, '').replace(/^Digit/, '').replace(/^Numpad/, 'Num');
 }
 
-// Live bindings — updated by the config panel, used immediately
 let bindings = loadBindings();
 export function getBindings() { return bindings; }
 export function setBindings(b: KeyBindings) { bindings = b; saveBindings(b); }
 
-// ---------- one-shot keys (cleared each frame) ----------
+// Keys pressed since the last frame, for the app's one-shot commands.
 const pressed = new Set<string>();
 addEventListener('keydown', e => { if (!e.repeat && !(e.target as HTMLElement | null)?.closest?.('input:not([type=range]), select, textarea, [contenteditable]')) pressed.add(e.code); });
 
-// ---------- held keys (for smooth driving) ----------
+// Keys held now, for driving.
 const held = new Set<string>();
 addEventListener('keydown', e => { if (!(e.target as HTMLElement | null)?.closest?.('input:not([type=range]), select, textarea, [contenteditable]')) held.add(e.code); });
 addEventListener('keyup', e => held.delete(e.code));
-// Always release all keys when window loses focus to prevent stuck keys
+// A key released while the window is in the background sends no keyup.
 addEventListener('blur', () => held.clear());
 
 export function keyboardInputs(): Inputs {
@@ -78,13 +76,6 @@ export function keyboardInputs(): Inputs {
     turretRight: held.has(b.turretRight),
     intakeHeld:  held.has(b.intake),
   };
-}
-
-export function keyboardActive(): boolean {
-  const b = bindings;
-  return held.has(b.forward) || held.has(b.back) || held.has(b.strafeLeft) || held.has(b.strafeRight) ||
-         held.has(b.turnLeft) || held.has(b.turnRight) || held.has(b.shoot) || held.has(b.intake) ||
-         held.has(b.placeFlower) || held.has(b.turretLeft) || held.has(b.turretRight);
 }
 
 const shape = (v: number) => { const d = 0.08, a = Math.abs(v); return a < d ? 0 : Math.sign(v) * ((a - d) / (1 - d)) ** 2; };
@@ -105,9 +96,46 @@ export interface Frame {
   camUp: boolean; camDown: boolean;
 }
 
+let xrSession: XRSession | null = null;
+/** Sets the headset session whose controllers drive, or null when it ends. */
+export function setXRSession(s: XRSession | null) { xrSession = s; startWas[1] = true; }
+
+/**
+ * Reads a headset's two controllers as one gamepad (the xr-standard mapping): the left stick drives, the right stick turns,
+ * the left trigger runs the intake, the right trigger launches POLLEN and the right grip NECTAR, the left grip places
+ * POLLEN and X places NECTAR, Y and B turn the turret, and A starts the MATCH.
+ */
+function xrPad(s: XRSession): { pad: PadState; start: boolean } | null {
+  let l: Gamepad | undefined, r: Gamepad | undefined;
+  for (const src of s.inputSources) { if (src.handedness === 'left') l = src.gamepad ?? l; if (src.handedness === 'right') r = src.gamepad ?? r; }
+  if (!l && !r) return null;
+  const btn = (g: Gamepad | undefined, n: number) => (g?.buttons[n]?.value ?? 0) > 0.4, axis = (g: Gamepad | undefined, n: number) => g?.axes[n] ?? 0;
+  const a = btn(r, 4), start = a && !startWas[1]; startWas[1] = a;
+  return {
+    start,
+    pad: {
+      id: 'Headset controllers',
+      inputs: {
+        forward: clamp(shape(-axis(l, 3))), strafeRight: clamp(shape(axis(l, 2))), turnRight: clamp(shape(axis(r, 2)) * 0.85),
+        shootPollen: btn(r, 0), shootNectar: btn(r, 1), placePollen: btn(l, 1), placeNectar: btn(l, 4),
+        turretLeft: btn(l, 5), turretRight: btn(r, 5), intakeHeld: btn(l, 0),
+      },
+    },
+  };
+}
+
+/** Rumbles the driving controller, where the browser supports it: `strong` for a launch, weak for a pickup. */
+export function rumble(strong: boolean) {
+  if (xrSession) {
+    for (const src of xrSession.inputSources) if (src.handedness === (strong ? 'right' : 'left')) (src.gamepad as (Gamepad & { hapticActuators?: { pulse(v: number, ms: number): Promise<boolean> }[] }) | undefined)?.hapticActuators?.[0]?.pulse(strong ? 0.6 : 0.3, strong ? 90 : 40).catch(() => {});
+    return;
+  }
+  const raw = [...navigator.getGamepads()].find(g => !!g && g.connected) as (Gamepad & { vibrationActuator?: { playEffect(t: string, p: object): Promise<unknown> } }) | undefined;
+  raw?.vibrationActuator?.playEffect('dual-rumble', { duration: strong ? 90 : 40, strongMagnitude: strong ? 0.6 : 0, weakMagnitude: strong ? 0.3 : 0.5 }).catch(() => {});
+}
+
 /** Reads the app-level one-shot keys and the controller. `prev`/`next`/`camUp`/`camDown` are the raw arrow keys; the page decides what they mean (timeline, camera pan, or the turret) from the phase and the bindings. */
 export function readInput(): Frame {
-  // App-level keys
   let start = pressed.has('Enter'), camera = pressed.has('KeyC');
   const reset = pressed.has('KeyR'), mark = pressed.has('KeyM'), review = pressed.has('KeyV'),
         play = pressed.has('Space'),
@@ -115,7 +143,11 @@ export function readInput(): Frame {
   const camUp = pressed.has('ArrowUp'), camDown = pressed.has('ArrowDown');
   pressed.clear();
 
-  // Single controller: only the first connected gamepad
+  // In a headset, its controllers drive.
+  const xr = xrSession && xrPad(xrSession);
+  if (xr) return { pad: xr.pad, keyboard: keyboardInputs(), start: start || xr.start, reset, camera: false, mark, review, play, prev, next, camUp, camDown };
+
+  // Only the first connected controller drives.
   const connected = [...navigator.getGamepads()].filter((g): g is Gamepad => !!g && g.connected);
   const raw = connected[0] ?? null;
   let pad: PadState | null = null;

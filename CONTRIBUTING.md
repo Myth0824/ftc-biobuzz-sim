@@ -9,7 +9,8 @@ You need Node.js 20 or later. Python 3 is needed only to rebuild the Match Lab a
 
 1. To install the dependencies, run `npm install`.
 2. To start the simulator, run `npm run dev`, and open the URL that Vite prints.
-3. To run the tests, run `npm test`. They take about 80 seconds.
+3. To run the tests, run `npm test`. They take about 80 seconds. `npm run test:watch` reruns them as you edit,
+   `npm run check` type-checks, and `npm run preview` serves the production build, with offline mode, at port 4173.
 
 The field model, `public/field.glb`, is in the repository, so you don't need the CAD to run anything. To rebuild it,
 download the official field STEP file to `cad/field-cad-step.step`, and run `node scripts/convert-step.mjs`.

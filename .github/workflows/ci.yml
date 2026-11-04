@@ -26,7 +26,10 @@ jobs:
         with:
           node-version: 22
           cache: npm
+      # Electron is for `npm run app` on a desktop. CI doesn't need its 100 MB binary.
       - run: npm ci
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: 1
       - name: Type-check
         run: npx tsc --noEmit
       - name: Test

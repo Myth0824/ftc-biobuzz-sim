@@ -39,6 +39,11 @@ You need Node.js 20 or later.
 To run the simulator as a desktop app instead, run `npm run app`: it starts the dev server on port 5888 and opens the
 simulator page in an Electron window.
 
+The deployed simulator also installs as an app and works offline, as at an event with no Wi-Fi: in Chrome or Edge on a
+computer, or the Meta Quest browser, use **Install** in the address bar or the browser menu. One visit online caches
+it. On a Quest, the headset button in the control bar drives from the alliance area in VR. See
+[docs/simulator.md](docs/simulator.md#platforms).
+
 | Input | Action |
 | --- | --- |
 | Left stick | Drive and strafe |

@@ -1,3 +1,4 @@
+import sounds from 'virtual:sounds';
 import type { MatchEvent } from './sim/world';
 
 /**
@@ -10,8 +11,7 @@ export class MatchAudio {
   private ctx: AudioContext | null = null; private files = new Map<string, HTMLAudioElement>();
 
   constructor() {
-    for (const cue of ['start_countdown', 'match_start', 'auto_end', 'pick_up_controllers', 'countdown', 'teleop_start', 'flowers_unlock', 'endgame', 'match_end', 'foul'])
-      for (const ext of ['wav', 'mp3']) fetch(`/sounds/${cue}.${ext}`, { method: 'HEAD' }).then(r => { if (r.ok && (r.headers.get('content-type') ?? '').startsWith('audio') && !this.files.has(cue)) this.files.set(cue, new Audio(`/sounds/${cue}.${ext}`)); }).catch(() => {});
+    for (const f of sounds) { const cue = f.replace(/\.\w+$/, ''); if (!this.files.has(cue)) this.files.set(cue, new Audio(`/sounds/${f}`)); }
   }
 
   private tone(freq: number, at: number, dur: number, type: OscillatorType = 'sine', gain = 0.18, slideTo?: number) {

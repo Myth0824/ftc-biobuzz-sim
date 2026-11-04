@@ -1,9 +1,11 @@
 import RAPIER from '@dimforge/rapier3d-compat';
-import { readInput, keyboardActive, type Frame } from './input';
-import { AUTO_PROBLEMS, AUTO_TREES, SOLO_AUTO, autoFor, autoStart, previewAuto } from './auto/onboard';
+import { readInput, rumble, setXRSession, type Frame } from './input';
+import { AUTO_PROBLEMS, AUTO_TREES, SOLO_AUTO, addAutoTree, autoFor, autoStart, previewAuto } from './auto/onboard';
+import { importPedro } from './auto/pedro';
 import { findNode } from './auto/auto-edit';
 import { FieldEditor } from './field-editor';
-import { loadUserTrees } from './user-trees';
+import { loadUserTrees, saveUserTree } from './user-trees';
+import { ROUNDS, TIERS, advance, bracketHtml, isChampion, isOver, loadBracket, newBracket, opponent, record, saveBracket, type Bracket } from './tournament';
 import { BOT_IDS, REF_ERR, MAIN_ROBOT_INDEX, startSide, assignDriver, defaultBot, metaBot, describe, describeLines, loadBots, robotConfig, sanitize, saveBots, type BotSetup, type DriverKind } from './setup';
 import { setBindings, getBindings, DEFAULT_BINDINGS, BINDING_LABELS, codeLabel, type KeyBindings } from './input';
 import { MatchAudio } from './audio';
@@ -14,7 +16,7 @@ import { TraceRecorder } from './trace';
 import { Inspector } from './render/inspector';
 import { LiveTreeState, TreePanel, treeStateAt } from './render/tree-view';
 import { TELEOP_TREES } from './auto/driver';
-import { CAMERAS, View, type CameraMode } from './render/view';
+import { View, type CameraMode } from './render/view';
 import { MATCH, RP } from './sim/config';
 import { fmtPos, getUnits, massFromInput, massToInput, setUnits, sizeFromInput, sizeToInput, speedFromInput, speedToInput, type Units } from './units';
 import { DT, NO_INPUT, Sim, type AllianceScore, type Inputs, type MatchMode } from './sim/world';
@@ -56,15 +58,19 @@ let units: Units = getUnits(); const unitsSel = $<HTMLSelectElement>('units'); u
 unitsSel.onchange = () => { units = unitsSel.value as Units; setUnits(units); unitsSel.blur(); paintBots(); if (editing >= 0) openConfig(editing); };
 let sim: Sim; let seed = 1; let startAt = 0; let recorder: TraceRecorder; let traceSaved = false; let coaches: Coach[] = [], referee: Referee | null = null;
 // A paused MATCH doesn't step. `callsSeen` counts the referee's calls that have a note, and `toasted` holds the sim messages that had a toast.
-let livePaused = false, callsSeen = 0, toasted = new WeakSet<object>(), savedFrames = -1;
+let livePaused = false, callsSeen = 0, toasted = new WeakSet<object>(), savedFrames = -1, recorded = false;
 const review = new Review(view, () => sim, canvas); let finalClosed = false;
 // The field editor edits one robot's AUTO poses before the MATCH. An edit switches the robot to the edited copy.
 const editor = new FieldEditor({ view, canvas, bots, sim: () => sim,
   setAuto: (k, id) => { bots[k].auto = id; saveBots(bots); if (coaches[k]) coaches[k].autoOverride = id === 'default' ? null : id; paintBots(); },
   changed: () => { camSel.value = view.mode; paintEditor(); paintTree(); } });
-/** The robot that the HUD, the chase camera, and the shot preview follow: the first robot with a human driver, or R0. */
+// In a tournament the bracket sets the blue robots, and the setups keep what the person chose for them.
+let bracket: Bracket | null = loadBracket();
+/** Gets robot `i`'s setup for this MATCH. */
+const entrant = (i: number): BotSetup => (bracket && i >= 2 ? opponent(bracket, i) : bots[i]);
+/** The robot that the HUD, the third-person camera, and the shot preview follow: the first robot with a human driver, or R0. */
 const focus = () => Math.max(0, bots.findIndex(b => b.driver !== 'planner'));
-const settings = () => ({ match: modeSel.value, stage: stageSel.value, referee: refSel.value, ...Object.fromEntries(bots.map((b, i) => [BOT_IDS[i], `plate ${b.plate} · ${describe(b)}`])) });
+const settings = () => ({ match: modeSel.value, stage: stageSel.value, referee: refSel.value, ...(bracket ? { tournament: `${ROUNDS[bracket.round]}, ${TIERS[bracket.round].name}` } : {}), ...Object.fromEntries(BOT_IDS.map((id, i) => { const b = entrant(i); return [id, `plate ${b.plate} · ${describe(b)}`]; })) });
 /**
  * Saves the trace into the repository's traces/ folder through the dev server. A trace that hasn't grown since the last
  * save isn't sent again. The game setup's "This match" line shows the result.
@@ -75,13 +81,12 @@ async function saveTrace() {
   try { const res = await fetch(`/api/trace/${tr.name}`, { method: 'POST', body: JSON.stringify(tr) }); status(res.ok ? `Trace saved: traces/${tr.name}.json` : 'Export saves the trace and the notes as files.'); } catch { status('Export saves the trace and the notes as files.'); }
 }
 /** Adds this finished MATCH to the site's live counter. The dev server has no counter, so a failure is silent. */
-async function countMatch() { try { await fetch('/api/matches', { method: 'POST' }); } catch { /* No counter here. */ } }
+// The counter is a Pages Function on the deployed site; the dev server has none.
+async function countMatch() { if (import.meta.env.DEV) return; try { await fetch('/api/matches', { method: 'POST' }); } catch { /* No counter here. */ } }
 /** Starts the MATCH after the announcer's "3-2-1-go". Requires the main robot to have a human driver. */
 function startMatch() {
   if (sim.phase !== 'pre' || startAt) return;
-  // Require a human driver on the main robot before starting
-  const main = bots[0];
-  if (main.driver === 'planner') { toast('Choose Controller or Keyboard in the robot config for team 32294 before starting.', 'ref'); return; }
+  if (bots[0].driver === 'planner') { toast('Choose Controller or Keyboard in the robot config for team 32294 before starting.', 'ref'); return; }
   closeConfig(); closeModals(); editor.close();
   if (!audio.enabled) { sim.start(); return; }
   audio.play('start_countdown'); startAt = performance.now() + 3000;
@@ -101,14 +106,15 @@ function timeline(mode: MatchMode): { span: number; marks: SystemMark[] } {
 }
 function reset() {
   editor.close();
-  const oc = Number(opponentsSel.value);
-  sim = new Sim(RAPIER, undefined, modeSel.value as MatchMode, seed++, { opponentCount: oc, playoff: stageSel.value === 'playoff', configFor: (a, slot) => robotConfig(bots[(a === 'red' ? 0 : 2) + slot]) });
+  // A tournament MATCH is a full playoff MATCH against a full blue alliance.
+  const oc = bracket ? 3 : Number(opponentsSel.value), mode = bracket ? 'full' : modeSel.value as MatchMode, playoff = !!bracket || stageSel.value === 'playoff';
+  sim = new Sim(RAPIER, undefined, mode, seed++, { opponentCount: oc, playoff, configFor: (a, slot) => robotConfig(entrant((a === 'red' ? 0 : 2) + slot)) });
   // Every robot has a Coach: it runs the robot's AUTO tree, and the planner in TELEOP unless a controller drives the robot.
   // Coaches record their trees, for the tree view and the match trace. Recording doesn't change what a robot does.
-  coaches = sim.robots.map((_, i) => { const c = new Coach(), b = bots[i]; c.flowerStartSec = b.flowerStartSec; c.defense = b.defense; c.autoOverride = b.auto === 'default' || b.auto === 'none' ? null : b.auto; c.traceTrees = true; return c; });
+  coaches = sim.robots.map((_, i) => { const c = new Coach(), b = entrant(i); c.flowerStartSec = b.flowerStartSec; c.defense = b.defense; c.autoOverride = b.auto === 'default' || b.auto === 'none' ? null : b.auto; c.traceTrees = true; return c; });
   referee = refSel.value === 'off' ? null : new Referee(); // The referee calls PINS (G421) by the fixed rule.
-  view.plates = bots.map(b => b.plate); review.plates = Object.fromEntries(bots.map((b, i) => [BOT_IDS[i], b.plate]));
-  Object.assign(window, { sim, coaches, editor, referee }); startAt = 0; review.exit(); review.notes = []; traceSaved = false; finalClosed = false;
+  view.plates = BOT_IDS.map((_, i) => entrant(i).plate); review.plates = Object.fromEntries(BOT_IDS.map((id, i) => [id, entrant(i).plate]));
+  Object.assign(window, { sim, coaches, editor, referee }); startAt = 0; review.exit(); review.notes = []; traceSaved = false; finalClosed = false; recorded = false;
   livePaused = sim.mode === 'practice'; callsSeen = 0; toasted = new WeakSet(); savedFrames = -1;
   recorder = new TraceRecorder(sim, settings()); const tl = timeline(sim.mode); review.attach(recorder.trace, tl.span, tl.marks); paintBots();
 }
@@ -127,57 +133,50 @@ const bc = { plate: $<HTMLInputElement>('bcplate'), driver: $<HTMLSelectElement>
 const autoOptions = (i: number) => { const side = startSide(i);
   return `<option value="default">Default: wall-sweep pair, ${side} robot</option>` + Object.entries(AUTO_TREES).filter(([, d]) => autoStart(d) !== (side === 'right' ? 'left' : 'right')).map(([k, d]) => `<option value="${k}" title="${d.description ?? ''}">${d.name}${AUTO_PROBLEMS[k] ? ' (has problems, doesn\'t run)' : ''}</option>`).join('') + `<option value="none">None</option>`; };
 const gear = (i: number) => `<button class="gear" data-bot="${i}" title="Robot config for ${bots[i].plate}">&#9881;</button>`;
-const badge = (i: number) => `<span style="font-size:9px;font-weight:800;padding:1px 4px;border-radius:3px;background:${i === MAIN_ROBOT_INDEX ? 'var(--ok)' : 'rgba(255,255,255,.18)'};color:${i === MAIN_ROBOT_INDEX ? '#0b1a10' : 'var(--dim)'};margin-left:4px;vertical-align:middle;flex-shrink:0">${i === MAIN_ROBOT_INDEX ? 'H' : 'B'}</span>`;
+const badge = (i: number) => (i === MAIN_ROBOT_INDEX ? '<span class="you">You</span>' : '');
 /** Draws the robot rows in the scoreboard and the robot cards in the game setup. Called when a setup changes, not on every frame, so that the buttons stay clickable. */
 function paintBots() {
-  // Keep paused class in sync so gear buttons show/hide correctly
   document.body.classList.toggle('paused', livePaused);
-  // Scoreboard rows: flex so the badge sits vertically centred next to the plate
-  $('tred').innerHTML = [0, 1].map(i => `<div style="display:flex;align-items:center;gap:2px">${bots[i].plate}${badge(i)}${gear(i)}</div>`).join('');
-  $('tblue').innerHTML = [2, 3].map(i => `<div style="display:flex;align-items:center;gap:2px">${bots[i].plate}${badge(i)}${gear(i)}</div>`).join('');
-  $('botlist').innerHTML = bots.map((b, i) => { const side = i < 2 ? 'red' : 'blue';
-    return `<div class="bot ${side}" data-bot="${i}" title="${describe(b, units)}"><div class="bothead"><b style="background:var(--${side});display:inline-flex;align-items:center;gap:2px">${b.plate}${badge(i)}</b><span>${BOT_IDS[i]} · ${startSide(i)} start</span>${gear(i)}</div><div class="botdesc">${describeLines(b, units).map(l => `<div>${l}</div>`).join('')}</div></div>`; }).join('');
+  $('tred').innerHTML = [0, 1].map(i => `<div>${bots[i].plate}${badge(i)}${gear(i)}</div>`).join('');
+  $('tblue').innerHTML = [2, 3].map(i => `<div>${entrant(i).plate}${bracket ? '' : gear(i)}</div>`).join('');
+  $('botlist').innerHTML = BOT_IDS.map((_, i) => { const b = entrant(i), side = i < 2 ? 'red' : 'blue';
+    return `<div class="bot ${side}" data-bot="${i}" title="${describe(b, units)}"><div class="bothead"><b style="background:var(--${side})">${b.plate}</b>${badge(i)}<span>${BOT_IDS[i]} · ${startSide(i)} start</span>${gear(i)}</div><div class="botdesc">${describeLines(b, units).map(l => `<div>${l}</div>`).join('')}</div></div>`; }).join('');
   document.querySelectorAll<HTMLElement>('button.gear, #botlist .bot').forEach(el => { el.onclick = e => { e.stopPropagation(); openConfig(Number(el.dataset.bot)); }; });
 }
 /** Opens the robot config popup. Allowed before/after match, and while paused mid-match. */
 function openConfig(i: number) {
   const canEdit = sim.phase === 'pre' || sim.phase === 'post' || livePaused;
   if (!canEdit || startAt) return;
-  // If mid-match and not yet paused, pause first
+  if (bracket && i >= 2) { toast(`In a tournament the bracket sets the blue robots: ${TIERS[bracket.round].blurb}.`); return; }
   if (sim.phase !== 'pre' && sim.phase !== 'post' && !livePaused) livePaused = true;
   if (review.active) review.exit(); closeModals(); editing = i; const b = bots[i];
   const isMain = i === MAIN_ROBOT_INDEX;
   $('bchead').textContent = `Robot config: ${b.plate} (${BOT_IDS[i]}), ${i < 2 ? 'red' : 'blue'} alliance, ${startSide(i)} start`; bc.auto.innerHTML = autoOptions(i);
-  bc.plate.value = b.plate;
-  // Lock plate for main robot
-  ($<HTMLInputElement>('bcplate')).disabled = isMain;
+  bc.plate.value = b.plate; bc.plate.disabled = isMain;
   bc.driver.value = b.driver; bc.drive.value = b.stickFrame; bc.shooter.value = b.shooter; bc.auto.value = b.auto; bc.plan.value = String(b.flowerStartSec); bc.rpm.value = String(b.driveRpm); bc.size.value = String(sizeToInput(b.sizeIn, units)); bc.mass.value = String(massToInput(b.massLb, units)); $('bcsizelabel').textContent = `Chassis, square, ${units === 'us' ? 'in.' : 'cm'}`; $('bcmasslabel').textContent = `Mass, ${units === 'us' ? 'lb' : 'kg'}`; bc.intake.value = b.dualIntake ? 'dual' : 'front'; bc.ends.value = b.turret ? 'turret' : b.dualShooter ? 'both' : 'one'; bc.turretRange.value = String(b.turretRangeDeg ?? 360); bc.turretSlew.value = b.turretSlewDegPerSec ? String(b.turretSlewDegPerSec) : ''; for (const id of ['bcturretrow', 'bcslewrow']) $(id).classList.toggle('hidden', !b.turret); bc.defense.value = b.defense; bc.elev.value = String(b.errElevDeg); bc.azim.value = String(b.errAzimDeg); bc.speed.value = String(speedToInput(b.errSpeed, units)); bc.intakeP.value = String(Math.round(100 * b.intakeP)); $('bcspeedlabel').textContent = `Launch speed, ${units === 'us' ? 'ft/s' : 'm/s'}`;
+  $<HTMLButtonElement>('bcpedro').disabled = i >= 2;
   const edit = $<HTMLButtonElement>('bcedit'); edit.disabled = i >= 2; edit.title = i >= 2 ? 'Edit AUTO trees from a red robot. Blue robots run the same trees rotated 180° about the FIELD center.' : EDIT_TIP;
-  // Only show driver row for the main robot (R0); all others are always AI
+  // Only R0 has a human driver. Its intake and turret are fixed, and it needs no TELEOP plan.
   $('bcdriverrow').classList.toggle('hidden', !isMain);
   $('bcdriverow').classList.toggle('hidden', b.driver === 'planner');
   $('bcnote').textContent = isMain
-    ? 'Team 32294 — your robot. Choose Controller or Keyboard to drive.'
+    ? 'Team 32294, your robot. Choose Controller or Keyboard to drive.'
     : 'This robot is always driven by the AI planner.';
-  // bcinrow/bcendsrow always hidden (locked for main, irrelevant for AI)
-  // bcturretrow/bcslewrow hidden for main robot (always 360 instant) and for non-turret AI bots
-  // bcplanrow hidden for main robot (human driver, no planner TELEOP plan needed)
-  for (const id of ['bcinrow', 'bcendsrow']) { const el = document.getElementById(id); if (el) el.classList.add('hidden'); }
-  for (const id of ['bcturretrow', 'bcslewrow']) { const el = document.getElementById(id); if (el) el.classList.toggle('hidden', isMain || !b.turret); }
-  const planRow = document.getElementById('bcplanrow'); if (planRow) planRow.classList.toggle('hidden', isMain);
+  for (const id of ['bcinrow', 'bcendsrow']) $(id).classList.add('hidden');
+  for (const id of ['bcturretrow', 'bcslewrow']) $(id).classList.toggle('hidden', isMain || !b.turret);
+  $('bcplanrow').classList.toggle('hidden', isMain);
   $('botcfg').classList.remove('hidden');
 }
 function closeConfig() { editing = -1; $('botcfg').classList.add('hidden'); }
-/** Reads the popup into the setup, saves it. If mid-match (paused), keeps running — rebuilds only from pre/post. */
+/** Reads the popup into the setup and saves it. Before or after a MATCH it rebuilds the FIELD; mid-MATCH it stays paused. */
 function applyConfig() {
   if (editing < 0) return; const i = editing, b = bots[i];
   Object.assign(b, { plate: bc.plate.value, stickFrame: bc.drive.value, shooter: bc.shooter.value, auto: bc.auto.value, flowerStartSec: Number(bc.plan.value), driveRpm: Number(bc.rpm.value), sizeIn: sizeFromInput(Number(bc.size.value), units), massLb: massFromInput(Number(bc.mass.value), units), dualIntake: bc.intake.value === 'dual', dualShooter: bc.ends.value === 'both', turret: bc.ends.value === 'turret', turretRangeDeg: Number(bc.turretRange.value) || 360, turretSlewDegPerSec: Number(bc.turretSlew.value) || null, defense: bc.defense.value, errElevDeg: Number(bc.elev.value), errAzimDeg: Number(bc.azim.value), errSpeed: speedFromInput(Number(bc.speed.value), units), intakeP: Number(bc.intakeP.value) / 100 });
   assignDriver(bots, i, bc.driver.value as DriverKind); bots[i] = sanitize(bots[i], i); saveBots(bots);
   const midMatch = sim.phase !== 'pre' && sim.phase !== 'post';
   if (midMatch) {
-    // Stay paused — changes take effect but field isn't rebuilt mid-match
     livePaused = true;
-    toast('Setting changed — press Play to continue.', '');
+    toast('Saved. Press Play to continue.');
     paintBots();
     openConfig(i);
   } else {
@@ -190,13 +189,32 @@ document.querySelectorAll<HTMLButtonElement>('[data-err]').forEach(el => { el.on
 /** Opens the AUTO editor on red robot `i`. After a MATCH, it resets the FIELD first, because the plan preview draws from the start positions. */
 function openEditor(i: number) { if (review.active || startAt) return; closeConfig(); closeModals(); if (sim.phase !== 'pre') reset(); editor.open(i); }
 $('bcedit').onclick = () => { if (editing >= 0 && editing < 2) openEditor(editing); };
+// A Pedro Pathing OpMode becomes a saved AUTO tree, and the robot runs it.
+$('bcpedro').onclick = () => $('bcpedrofile').click();
+async function importPedroFile(file: File, i: number) {
+  try {
+    const { tree, warnings } = importPedro(await file.text(), file.name);
+    addAutoTree(tree); saveUserTree(tree); bots[i].auto = String(tree.id); saveBots(bots); reset(); openConfig(i);
+    toast([`Imported ${tree.name} for ${bots[i].plate}.`, ...warnings].join(' '));
+  } catch (err) { toast(`Can't import ${file.name}: ${(err as Error).message}`, 'ref'); }
+}
+$<HTMLInputElement>('bcpedrofile').onchange = e => {
+  const input = e.target as HTMLInputElement, file = input.files?.[0]; input.value = ''; if (file && editing >= 0) void importPedroFile(file, editing);
+};
+// A .java file dropped on the page imports for the red robot whose setup is open, or for your robot.
+addEventListener('dragover', e => { if (e.dataTransfer?.types.includes('Files')) e.preventDefault(); });
+addEventListener('drop', e => {
+  const file = e.dataTransfer?.files[0]; if (!file) return; e.preventDefault();
+  if (!/\.java$/i.test(file.name)) { toast(`Drop a Pedro Pathing OpMode's .java file to import it. ${file.name} isn't one.`); return; }
+  void importPedroFile(file, editing === 1 ? 1 : 0);
+});
 $('editauto').onclick = () => { $('editauto').blur(); closeModals(); if (editor.active) editor.close(); else openEditor(treeRobot === 1 ? 1 : 0); };
 $('bcdone').onclick = closeConfig; const applyPreset = (make: (i: number) => BotSetup) => { if (editing < 0) return; const i = editing, keep = { plate: bots[i].plate, driver: bots[i].driver, stickFrame: bots[i].stickFrame }; bots[i] = { ...make(i), ...keep }; saveBots(bots); reset(); openConfig(i); };
 $('bcdefault').onclick = () => applyPreset(metaBot); $('bcbaseline').onclick = () => applyPreset(defaultBot);
 // A click on the FIELD floor shows the position in a toast, in the coordinate system that the floor labels show.
 // In the review, a click on a robot adds a note instead.
 canvas.addEventListener('click', e => {
-  if (editor.takeClick()) return;
+  if (editor.takeClick() || view.dragged) return;
   // In the editor, a click on the other red robot shows that robot's plan. A click on a handle never gets here.
   if (editor.active) {
     // Only a click on the robot itself counts: in the overhead view a robot is a large target, and its path passes near it.
@@ -250,21 +268,29 @@ const SETTINGS_KEY = 'biobuzz.settings.v1';
 loadAllSettings();
 reset();
 // Entering the review saves the trace first, so that annotations always have their trace on disk.
-function openReview() { closeConfig(); closeModals(); editor.close(); void saveTrace(); review.enter(recorder.trace); view.enterFreeLook(); }
+function openReview() { closeConfig(); closeModals(); editor.close(); void saveTrace(); view.enterFreeLook(); review.enter(recorder.trace); }
 /** Applies a game-setup change. Mid-match: pauses and notes change takes effect next reset. Pre/post: resets immediately. */
 function applySetup() {
   saveAllSettings();
   if (sim.phase !== 'pre' && sim.phase !== 'post') {
     livePaused = true;
-    toast('Setting changed — press Reset to apply, or Play to continue.', '');
+    toast('Saved. It applies after Reset; Play continues this MATCH.');
   } else {
     reset();
   }
 }
 modeSel.onchange = applySetup; refSel.onchange = applySetup; stageSel.onchange = applySetup;
+/** Starts a tournament from the first round, or leaves the one in progress. */
+function setBracket(b: Bracket | null) { bracket = b; saveBracket(b); paintBracket(); stopMatch(); }
+function paintBracket() {
+  $('tourstart').textContent = bracket ? 'Leave tournament' : 'Start tournament';
+  $('tourbox').innerHTML = bracket ? bracketHtml(bracket) : '';
+  // A tournament plays full playoff MATCHES against a full field, so those settings step aside.
+  for (const el of [modeSel, opponentsSel, stageSel]) el.closest('label')!.classList.toggle('hidden', !!bracket);
+}
+$('tourstart').onclick = () => { $('tourstart').blur(); setBracket(bracket ? null : newBracket()); };
+paintBracket();
 opponentsSel.onchange = () => { try { localStorage.setItem('biobuzz.opponents', opponentsSel.value); } catch { /* ok */ } opponentsSel.blur(); applySetup(); };
-
-// ---------- persistent settings (auto-save to localStorage on every change) ----------
 
 function saveAllSettings() {
   try {
@@ -293,7 +319,6 @@ function loadAllSettings() {
   } catch (e) { console.warn('Could not load the saved settings; starting with the defaults.', e); }
 }
 
-// Auto-save whenever any setting changes
 for (const el of [modeSel, stageSel, opponentsSel, camSel, unitsSel, soundSel, treeSel, pathsSel, trajSel, refSel]) {
   el.addEventListener('change', saveAllSettings);
 }
@@ -374,7 +399,8 @@ $('openkeybinds').onclick = () => { closeModals(); paintKeyBindings(); $('keybin
 $('kbreset').onclick = () => { setBindings({ ...DEFAULT_BINDINGS }); paintKeyBindings(); };
 $('keybinds').addEventListener('click', e => { const t = e.target as HTMLElement; if (t === $('keybinds') || t.closest('[data-close]')) closeModals(); });
 // The score table under the bar opens and closes. This browser keeps the choice.
-let scoreOpen = true; try { scoreOpen = localStorage.getItem('biobuzz.score') !== 'off'; } catch { /* Storage is a convenience. */ }
+// On a narrow screen, such as a tablet, the score table starts hidden: it would cover the FIELD.
+let scoreOpen = innerWidth >= 1000; try { const v = localStorage.getItem('biobuzz.score'); if (v) scoreOpen = v === 'on'; } catch { /* Storage is a convenience. */ }
 bind('tscore', () => { scoreOpen = !scoreOpen; try { localStorage.setItem('biobuzz.score', scoreOpen ? 'on' : 'off'); } catch { /* Storage is a convenience. */ } $('left').classList.toggle('hidden', !scoreOpen); paintTree(); });
 /** Shows a message at the bottom edge for 4 s. At most three show at a time. */
 function toast(text: string, cls = '') {
@@ -400,9 +426,13 @@ camSel.onchange = () => { view.mode = camSel.value as CameraMode; };
 for (const el of [modeSel, camSel, refSel, stageSel, opponentsSel]) el.addEventListener('change', () => el.blur());
 
 /** Rotates stick input from the driver's point of view into the frame of robot `i`. */
-function fieldCentric(inp: Inputs, i: number): Inputs {
-  const v = sim.view(i), side = v.alliance === 'red' ? 1 : -1, f = inp.forward * side, s = inp.strafeRight * side, th = v.heading;
-  return { ...inp, forward: f * Math.cos(th) - s * Math.sin(th), strafeRight: f * Math.sin(th) + s * Math.cos(th) };
+/**
+ * Turns stick inputs in the driver's frame into the robot's frame. The driver looks along heading `look`: from the
+ * alliance wall, or along the third-person camera.
+ */
+function fieldCentric(inp: Inputs, i: number, look: number): Inputs {
+  const a = look - sim.view(i).heading, f = inp.forward, s = inp.strafeRight;
+  return { ...inp, forward: f * Math.cos(a) + s * Math.sin(a), strafeRight: s * Math.cos(a) - f * Math.sin(a) };
 }
 
 type ScoreKey = Exclude<keyof AllianceScore, 'rp' | 'total'>;
@@ -423,244 +453,94 @@ function scoreRows(r: AllianceScore | null, b: AllianceScore | null, totals: { r
   return html;
 }
 // ---------- step settings panel ----------
-// Shown when a drive.driveTo step (orange dot) is selected in the AUTO editor.
-// If the step is already wrapped in a parallel, reads/writes the siblings directly.
-// If bare, wraps it on first change.
+// When a drive step is selected in the AUTO editor, this panel adds an intake and a turret angle beside it, in a
+// `parallel` that wraps the drive, and a shoot step right after it. The shooter can't share the parallel: the drive
+// and the shooter are separate subsystems, and a shot from a moving robot misses.
 
 let stepSettingsKey = '';
-
 type JsonObj = Record<string, unknown>;
 
-/** Recursively finds the children array that directly contains a node with the given id. */
+/** Finds the children array that holds the node with this id, at any depth. */
 function findChildrenContaining(obj: unknown, id: string): JsonObj[] | null {
   if (!obj || typeof obj !== 'object') return null;
-  const o = obj as JsonObj;
-  for (const key of Object.keys(o)) {
-    if (key === 'children' && Array.isArray(o[key])) {
-      const arr = o[key] as JsonObj[];
-      if (arr.some(c => (c as JsonObj).id === id)) return arr;
-    }
-    const r = findChildrenContaining(o[key], id);
-    if (r) return r;
+  for (const [key, v] of Object.entries(obj as JsonObj)) {
+    if (key === 'children' && Array.isArray(v) && v.some((c: JsonObj) => c.id === id)) return v as JsonObj[];
+    const r = findChildrenContaining(v, id); if (r) return r;
   }
   return null;
 }
 
 /**
- * Given a selected path, returns:
- * - driveNodeId: the id of the drive.driveTo node
- * - siblings: the array of children of the parallel wrapper (or null if bare drive)
- * - parentChildren: the array that contains the step (for wrapping)
- * - stepIdx: index of the step in parentChildren
- * - isWrapped: whether already in a parallel
+ * Finds the selected drive step in `tree`: the array that holds it and its index there, and, when a parallel already
+ * wraps it, the parallel's children. Returns null when the selection isn't a drive step.
  */
 function resolveStepContext(tree: JsonObj, path: string, node: ReturnType<typeof editor.selectedNode>) {
-  if (!path) return null;
-  const segId = path.split('/').pop()!;
-
-  // Case 1: selected node is a bare drive.driveTo
-  if (node?.label === 'drive.driveTo') {
-    const parentArr = findChildrenContaining(tree, segId);
-    if (!parentArr) return null;
-    const idx = parentArr.findIndex(c => (c as JsonObj).id === segId);
-    return { driveNodeId: segId, siblings: null as JsonObj[] | null, parentChildren: parentArr, stepIdx: idx, isWrapped: false };
-  }
-
-  // Case 2: selected node is a parallel wrapping a drive.driveTo
-  if (node?.label === 'parallel') {
-    const rawNode = findNode(tree, path) as JsonObj | null;
-    if (!rawNode || !('parallel' in rawNode)) return null;
-    const par = rawNode.parallel as JsonObj;
-    if (!Array.isArray(par.children)) return null;
-    const siblings = par.children as JsonObj[];
-    const driveChild = siblings.find(c => (c as JsonObj).ref === 'drive.driveTo') as JsonObj | undefined;
-    if (!driveChild) return null;
-    const parentArr = findChildrenContaining(tree, segId);
-    if (!parentArr) return null;
-    const idx = parentArr.findIndex(c => (c as JsonObj).id === segId);
-    return { driveNodeId: (driveChild.id ?? segId + '-drive') as string, siblings, parentChildren: parentArr, stepIdx: idx, isWrapped: true };
-  }
-
-  return null;
+  const id = path.split('/').pop()!, parentChildren = findChildrenContaining(tree, id);
+  if (!path || !parentChildren) return null;
+  const stepIdx = parentChildren.findIndex(c => c.id === id);
+  if (node?.label === 'drive.driveTo') return { siblings: null, parentChildren, stepIdx };
+  const kids = ((findNode(tree, path) as JsonObj | null)?.parallel as JsonObj | undefined)?.children;
+  if (node?.label !== 'parallel' || !Array.isArray(kids) || !kids.some((c: JsonObj) => c.ref === 'drive.driveTo')) return null;
+  return { siblings: kids as JsonObj[], parentChildren, stepIdx };
 }
 
-/** Wraps a bare drive.driveTo in a parallel any and returns the siblings array. */
+/** Wraps a bare drive step in a `parallel` of policy `any`, which keeps the step's id, and returns its children. */
 function wrapInParallel(parentChildren: JsonObj[], stepIdx: number): JsonObj[] {
-  const step = parentChildren[stepIdx];
-  const stepId = (step as JsonObj).id as string;
-  const driveChild = { ...step, id: `${stepId}-drive` };
-  const wrapper: JsonObj = { id: stepId, parallel: { policy: 'any', children: [driveChild] } };
-  parentChildren[stepIdx] = wrapper;
-  return (wrapper.parallel as JsonObj).children as JsonObj[];
+  const step = parentChildren[stepIdx], children = [{ ...step, id: `${step.id}-drive` }];
+  parentChildren[stepIdx] = { id: step.id, parallel: { policy: 'any', children } };
+  return children;
 }
 
 function paintStepSettings() {
-  const node = editor.selectedNode();
-  const isDrive = node?.label === 'drive.driveTo' || node?.label === 'parallel';
-  const panel = document.getElementById('stepSettings');
-  if (!panel) return;
-
-  if (!isDrive || !editor.active || !editor.selected) { panel.classList.add('hidden'); stepSettingsKey = ''; return; }
-
-  // For parallel, only show if it wraps a drive step
-  if (node?.label === 'parallel') {
-    const t = editor.cloneTree();
-    const rawNode = findNode(t, editor.selected) as JsonObj | null;
-    const par = rawNode?.parallel as JsonObj | undefined;
-    const hasDrive = Array.isArray(par?.children) && (par!.children as JsonObj[]).some(c => (c as JsonObj).ref === 'drive.driveTo');
-    if (!hasDrive) { panel.classList.add('hidden'); stepSettingsKey = ''; return; }
-  }
-
-  const key = `${editor.def?.id ?? ''}|${editor.selected}|${editor.rev}`;
+  const panel = $('stepSettings'), node = editor.selectedNode(), path = editor.selected;
+  if (!editor.active || !path) { panel.classList.add('hidden'); stepSettingsKey = ''; return; }
+  const key = `${editor.def?.id ?? ''}|${path}|${editor.rev}|${editor.editing}`;
   if (key === stepSettingsKey) return;
   stepSettingsKey = key;
-  panel.classList.remove('hidden');
+  const ctx = resolveStepContext(editor.cloneTree(), path, node);
+  panel.classList.toggle('hidden', !ctx); if (!ctx) return;
 
-  // Read current siblings
-  const tree = editor.cloneTree();
-  const ctx = resolveStepContext(tree, editor.selected, node);
-  const siblings: JsonObj[] = ctx?.siblings ?? [];
+  const stepId = path.split('/').pop()!, sibs = ctx.siblings ?? [], next = ctx.parentChildren[ctx.stepIdx + 1];
+  const param = (n: JsonObj | null | undefined, k: string) => (n?.params as JsonObj | undefined)?.[k];
+  const intake = sibs.find(c => c.ref === 'intake.set' || c.ref === 'intake.run'), turret = sibs.find(c => c.ref === 'turret.angle');
+  const shoot = next?.id === `${stepId}-shoot` && next.ref === 'shooter.shoot' ? next : null;
+  const filter = (param(intake, 'filter') as string) ?? 'pollen', ro = !editor.editing;
+  const off = (on: boolean) => (!on || ro ? 'disabled' : '');
+  const filters: [string, string][] = [['pollen', 'POLLEN only'], ['own_nectar', 'Own NECTAR only'], ['all', 'All elements'], ['none', 'Off']];
 
-  const intakeNode  = siblings.find(c => c.ref === 'intake.set' || c.ref === 'intake.run') ?? null;
-  const turretNode  = siblings.find(c => c.ref === 'turret.angle') ?? null;
-  // Shoot is placed as a separate step after this one in the parent sequence, not inside the parallel
-  const stepId = editor.selected!.split('/').pop()!;
-  const parentTree = editor.cloneTree();
-  const parentArr = findChildrenContaining(parentTree, stepId);
-  const parentIdx = parentArr ? parentArr.findIndex(c => (c as JsonObj).id === stepId) : -1;
-  const nextStep = parentArr && parentIdx >= 0 ? parentArr[parentIdx + 1] as JsonObj | undefined : undefined;
-  const shootNode = (nextStep?.id === `${stepId}-shoot` && nextStep?.ref === 'shooter.shoot') ? nextStep : null;
+  panel.innerHTML = `<h2>Step ${stepId}</h2>
+    ${ro ? '<p class="ss-note">Click <b>Edit</b> in the editor bar to change this step.</p>' : ''}
+    <div class="ss-row"><input type="checkbox" id="ss-intake-on" ${intake ? 'checked' : ''} ${ro ? 'disabled' : ''}><label for="ss-intake-on">Intake</label>
+      <select id="ss-intake-filter" ${off(!!intake)}>${filters.map(([v, l]) => `<option value="${v}" ${v === filter ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+    <div class="ss-row"><input type="checkbox" id="ss-turret-on" ${turret ? 'checked' : ''} ${ro ? 'disabled' : ''}><label for="ss-turret-on">Turret</label>
+      <input id="ss-turret-deg" type="number" min="-180" max="180" step="5" value="${param(turret, 'degrees') ?? 0}" ${off(!!turret)}><span>°, 90 is left</span></div>
+    <div class="ss-row"><input type="checkbox" id="ss-shoot-on" ${shoot ? 'checked' : ''} ${ro ? 'disabled' : ''}><label for="ss-shoot-on">Shoot</label>
+      <input id="ss-shoot-count" type="number" min="1" max="4" step="1" value="${param(shoot, 'count') ?? 3}" ${off(!!shoot)}><span>elements,</span>
+      <input id="ss-shoot-timeout" type="number" min="0.5" max="10" step="0.5" value="${param(shoot, 'timeoutSec') ?? 3}" ${off(!!shoot)}><span>s at most</span></div>`;
+  if (ro) return;
 
-  const intakeOn     = !!intakeNode;
-  const intakeFilter = ((intakeNode?.params as JsonObj)?.filter as string) ?? 'pollen';
-  const turretOn     = !!turretNode;
-  const turretDeg    = ((turretNode?.params as JsonObj)?.degrees as number) ?? 0;
-  const shootOn      = !!shootNode;
-  const shootCount   = ((shootNode?.params as JsonObj)?.count as number) ?? 3;
-  const shootTimeout = ((shootNode?.params as JsonObj)?.timeoutSec as number) ?? 3;
-  const readOnly     = !editor.editing;
-  const dis          = readOnly ? 'disabled' : '';
-  const stepLabel    = editor.selected.split('/').pop() ?? 'step';
-
-  panel.innerHTML = `
-    <h3 style="margin:0 0 8px;font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--dim)">Step settings — ${stepLabel}</h3>
-    ${readOnly ? `<p style="color:var(--dim);font-size:11px;margin:0 0 8px">Click <b>Edit</b> in the editor bar to change settings.</p>` : ''}
-    <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
-      <input type="checkbox" id="ss-intake-on" ${intakeOn ? 'checked' : ''} ${dis}>
-      <label for="ss-intake-on" style="font-size:12px;font-weight:600;min-width:44px">Intake</label>
-      <select id="ss-intake-filter" style="flex:1;font-size:12px" ${!intakeOn || readOnly ? 'disabled' : ''}>
-        <option value="pollen"     ${intakeFilter === 'pollen'     ? 'selected' : ''}>POLLEN only</option>
-        <option value="own_nectar" ${intakeFilter === 'own_nectar' ? 'selected' : ''}>Own NECTAR only</option>
-        <option value="all"        ${intakeFilter === 'all'        ? 'selected' : ''}>All elements</option>
-        <option value="none"       ${intakeFilter === 'none'       ? 'selected' : ''}>Off</option>
-      </select>
-    </div>
-    <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
-      <input type="checkbox" id="ss-turret-on" ${turretOn ? 'checked' : ''} ${dis}>
-      <label for="ss-turret-on" style="font-size:12px;font-weight:600;min-width:44px">Turret</label>
-      <input id="ss-turret-deg" type="number" min="-180" max="180" step="5" value="${turretDeg}"
-        style="width:64px;font-size:12px" ${!turretOn || readOnly ? 'disabled' : ''}>
-      <span style="font-size:11px;color:var(--dim)">° &nbsp;0=fwd · 90=left · −90=right</span>
-    </div>
-    <div style="display:flex;align-items:center;gap:8px">
-      <input type="checkbox" id="ss-shoot-on" ${shootOn ? 'checked' : ''} ${dis}>
-      <label for="ss-shoot-on" style="font-size:12px;font-weight:600;min-width:44px">Shoot</label>
-      <input id="ss-shoot-count" type="number" min="1" max="4" step="1" value="${shootCount}"
-        style="width:44px;font-size:12px" ${!shootOn || readOnly ? 'disabled' : ''}>
-      <span style="font-size:11px;color:var(--dim)">balls,</span>
-      <input id="ss-shoot-timeout" type="number" min="0.5" max="10" step="0.5" value="${shootTimeout}"
-        style="width:50px;font-size:12px" ${!shootOn || readOnly ? 'disabled' : ''}>
-      <span style="font-size:11px;color:var(--dim)">s timeout</span>
-    </div>`;
-
-  if (readOnly) return;
-
-  function applySettings() {
-    const on_i = (document.getElementById('ss-intake-on')     as HTMLInputElement).checked;
-    const filt = (document.getElementById('ss-intake-filter') as HTMLSelectElement).value;
-    const on_t = (document.getElementById('ss-turret-on')     as HTMLInputElement).checked;
-    const deg  = Number((document.getElementById('ss-turret-deg')     as HTMLInputElement).value);
-    const on_s = (document.getElementById('ss-shoot-on')      as HTMLInputElement).checked;
-    const cnt  = Number((document.getElementById('ss-shoot-count')    as HTMLInputElement).value);
-    const tout = Number((document.getElementById('ss-shoot-timeout')  as HTMLInputElement).value);
-
-    const t   = editor.cloneTree();
-    const ctx2 = resolveStepContext(t, editor.selected ?? '', node);
-    if (!ctx2) return;
-
-    // Get or create the siblings array
-    const sibs: JsonObj[] = ctx2.isWrapped
-      ? ctx2.siblings!
-      : wrapInParallel(ctx2.parentChildren, ctx2.stepIdx);
-
-    const rm = (ref: string) => { const i = sibs.findIndex(c => c.ref === ref); if (i >= 0) sibs.splice(i, 1); };
-
-    // Intake — use intake.run (same as existing plans), not intake.set, to avoid double-intake conflict
-    rm('intake.set'); rm('intake.run');
-    if (on_i) sibs.push({ ref: 'intake.run', params: { filter: filt } });
-
-    // Turret — runs in parallel alongside drive
-    rm('turret.angle');
-    if (on_t) sibs.push({ ref: 'turret.angle', params: { degrees: deg, timeoutSec: 2 } });
-
-    // Shoot — must NOT be in the same parallel as drive (shooter subsystem conflict).
-    // Instead the parallel wraps only drive+intake+turret, and shoot is added as
-    // a separate step right after in the parent sequence.
-    rm('shooter.shoot');
-
-    // If only the drive child remains, unwrap back to a bare step
-    if (sibs.length === 1 && (sibs[0] as JsonObj).ref === 'drive.driveTo' && ctx2.isWrapped) {
-      const { parentChildren, stepIdx } = ctx2;
-      const driveChild = sibs[0];
-      const stepId = (parentChildren[stepIdx] as JsonObj).id;
-      parentChildren[stepIdx] = { ...driveChild, id: stepId };
+  const checked = (id: string) => $<HTMLInputElement>(id).checked, value = (id: string) => $<HTMLInputElement>(id).value;
+  const apply = () => {
+    const t = editor.cloneTree(), c = resolveStepContext(t, path, node); if (!c) return;
+    const add: JsonObj[] = [
+      ...(checked('ss-intake-on') ? [{ ref: 'intake.run', params: { filter: value('ss-intake-filter') } }] : []),
+      ...(checked('ss-turret-on') ? [{ ref: 'turret.angle', params: { degrees: Number(value('ss-turret-deg')), timeoutSec: 2 } }] : []),
+    ];
+    if (c.siblings || add.length) {
+      const kids = c.siblings ?? wrapInParallel(c.parentChildren, c.stepIdx);
+      for (let k = kids.length - 1; k >= 0; k--) if (['intake.set', 'intake.run', 'turret.angle', 'shooter.shoot'].includes(String(kids[k].ref))) kids.splice(k, 1);
+      kids.push(...add);
+      // A parallel with only the drive left goes back to a bare drive step.
+      if (kids.length === 1 && kids[0].ref === 'drive.driveTo') c.parentChildren[c.stepIdx] = { ...kids[0], id: stepId };
     }
-
-    // Handle shoot: add/remove a shoot step immediately after this step in the parent sequence
-    const { parentChildren, stepIdx } = ctx2;
-    // Find actual step index after possible unwrap
-    const currentStepId = editor.selected!.split('/').pop()!;
-    const actualIdx = parentChildren.findIndex(c => (c as JsonObj).id === currentStepId);
-    const shootIdx = actualIdx + 1;
-    // Remove existing shoot step that was added by this panel (tagged with ss-shoot)
-    if (shootIdx < parentChildren.length && (parentChildren[shootIdx] as JsonObj).id === `${currentStepId}-shoot`) {
-      parentChildren.splice(shootIdx, 1);
-    }
-    if (on_s) {
-      parentChildren.splice(actualIdx + 1, 0, {
-        id: `${currentStepId}-shoot`,
-        note: 'Shoots after the drive step above. Added by step settings.',
-        ref: 'shooter.shoot',
-        params: { count: cnt, timeoutSec: tout },
-      });
-    }
-
-    editor.applyTree(t);
-    stepSettingsKey = ''; // force redraw on next paintEditor
-  }
-
-  // Checkbox toggles enable/disable dependent fields immediately
-  document.getElementById('ss-intake-on')!.onchange = () => {
-    (document.getElementById('ss-intake-filter') as HTMLSelectElement).disabled =
-      !(document.getElementById('ss-intake-on') as HTMLInputElement).checked;
-    applySettings();
+    if (c.parentChildren[c.stepIdx + 1]?.id === `${stepId}-shoot`) c.parentChildren.splice(c.stepIdx + 1, 1);
+    if (checked('ss-shoot-on')) c.parentChildren.splice(c.stepIdx + 1, 0, { id: `${stepId}-shoot`, note: 'Shoots after the drive step above. Added by step settings.', ref: 'shooter.shoot', params: { count: Number(value('ss-shoot-count')), timeoutSec: Number(value('ss-shoot-timeout')) } });
+    editor.applyTree(t); stepSettingsKey = '';
   };
-  document.getElementById('ss-turret-on')!.onchange = () => {
-    (document.getElementById('ss-turret-deg') as HTMLInputElement).disabled =
-      !(document.getElementById('ss-turret-on') as HTMLInputElement).checked;
-    applySettings();
-  };
-  document.getElementById('ss-shoot-on')!.onchange = () => {
-    const on = (document.getElementById('ss-shoot-on') as HTMLInputElement).checked;
-    (document.getElementById('ss-shoot-count')   as HTMLInputElement).disabled = !on;
-    (document.getElementById('ss-shoot-timeout') as HTMLInputElement).disabled = !on;
-    applySettings();
-  };
-  for (const id of ['ss-intake-filter', 'ss-turret-deg', 'ss-shoot-count', 'ss-shoot-timeout']) {
-    const el = document.getElementById(id)!;
-    el.onchange = applySettings;
+  panel.querySelectorAll<HTMLInputElement | HTMLSelectElement>('input, select').forEach(el => {
+    el.onchange = apply;
     for (const ev of ['keydown', 'keyup']) el.addEventListener(ev, e => e.stopPropagation());
-  }
+  });
 }
 
 // ---------- field editor ----------
@@ -836,6 +716,30 @@ function paintTree() {
   treePanel.paint(`${plate} · ${t.period === 'auto' ? 'AUTO' : 'TELEOP'} · ${t.def.name}`, t.def, liveTrees[i].read(t.recorder));
 }
 
+/**
+ * The driver's HUD at the bottom edge, in TELEOP: what the robot carries, in launch order, and whether the shot preview
+ * enters the CELL. It shows only for a robot with a human driver.
+ */
+function paintDriverHud() {
+  const fi = focus(), me = sim.view(fi), show = !review.active && bots[fi].driver !== 'planner' && (sim.phase === 'teleop' || sim.phase === 'transition');
+  $('drivehud').classList.toggle('hidden', !show); if (!show) return;
+  const slots = Array.from({ length: me.cfg.capacity }, (_, k) => me.carried[k]).map(k => `<i class="${k ? (k === 'pollen' ? 'pollen' : k === 'nectar_red' ? 'nred' : 'nblue') : ''}"></i>`).join('');
+  const aim = view.onTarget === null ? '' : `<span class="aim${view.onTarget ? ' on' : ''}">${view.onTarget ? 'On target' : 'Off target'}</span>`;
+  const html = `<span class="slots">${slots}</span>${aim}`;
+  if ($('drivehud').dataset.html !== html) { $('drivehud').dataset.html = html; $('drivehud').innerHTML = html; }
+}
+banner.addEventListener('click', e => { if ((e.target as HTMLElement).closest('[data-play]')) startMatch(); });
+
+/** The bracket and the next step, on the results card of a tournament MATCH. */
+function tournamentCard(b: Bracket): string {
+  const res = b.results[b.round], round = ROUNDS[b.round];
+  const [msg, next] = isChampion(b) ? ['Tournament champions!', 'New tournament']
+    : res === 'lost' ? [`Eliminated in the ${round}.`, 'New tournament']
+    : res === 'won' ? [`You won the ${round}.`, `Next: ${ROUNDS[b.round + 1]}`]
+    : [`A tie replays the ${round}.`, `Replay the ${round}`];
+  return `<div class="tourmsg">${msg}</div>${bracketHtml(b)}<div class="btns"><button id="fnext" class="primary">${next}</button></div>`;
+}
+
 function hud(pad: Frame['pad']) {
   paintTree();
   // In the review, the scoreboard, the clock, and the score table show the trace frame at the cursor.
@@ -843,6 +747,7 @@ function hud(pad: Frame['pad']) {
   const totals = f ? f.score : { red: r!.total, blue: b!.total }, phase = (f ? f.phase : sim.phase) as Sim['phase'], clock = f ? f.clock : sim.timer;
   $('sred').textContent = String(totals.red); $('sblue').textContent = String(totals.blue);
   $('clock').textContent = f ? clockText(clock) : fmt(clock);
+  view.board(totals.red, totals.blue, $('clock').textContent ?? '', phase === 'pre' ? 'Press A to start' : phase === 'post' ? 'Final · A resets' : phase);
   const flowersOpen = f ? phase === 'teleop' && clock <= 60 : sim.flowersUnlocked;
   $('phase').textContent = { pre: 'Ready', auto: 'AUTO', transition: 'Transition', teleop: sim.mode === 'practice' ? 'Practice' : flowersOpen ? 'TELEOP · FLOWERS open' : 'TELEOP', post: 'Final' }[phase];
   document.body.classList.toggle('playing', !f && (sim.phase === 'auto' || sim.phase === 'transition' || sim.phase === 'teleop' || startAt > 0));
@@ -850,35 +755,31 @@ function hud(pad: Frame['pad']) {
   $('scoretable').innerHTML = scoreRows(r, b, totals, phase === 'post');
   // At the end of the MATCH, a results card shows the final score, the breakdown, and the ranking points.
   const showFinal = !f && sim.phase === 'post' && !finalClosed; $('final').classList.toggle('hidden', !showFinal); $('left').classList.toggle('hidden', showFinal || !scoreOpen);
-  if (showFinal && r && b && $('final').dataset.key !== `${r.total}-${b.total}`) {
+  const finalKey = `${r?.total}-${b?.total}-${bracket ? bracket.round + bracket.results.join() : ''}`;
+  if (showFinal && r && b && $('final').dataset.key !== finalKey) {
     const win = r.total > b.total ? 'RED WINS' : b.total > r.total ? 'BLUE WINS' : 'TIE', bg = r.total > b.total ? 'var(--red)' : b.total > r.total ? 'var(--blue)' : '#5b6370';
-    $('final').dataset.key = `${r.total}-${b.total}`;
+    $('final').dataset.key = finalKey;
     $('final').innerHTML = `<div class="win" style="background:${bg}">${win}</div><div class="big"><div style="background:var(--red)">${r.total}</div><div style="background:var(--blue)">${b.total}</div></div>` +
-      `<div class="body"><table class="ftc">${scoreRows(r, b, totals, true)}</table><div class="btns"><button id="freview" class="primary">Review and annotate (V)</button><button id="fclose">Close</button></div><div style="color:var(--dim);margin-top:6px;text-align:center">Press R to reset the field.</div></div>`;
+      `<div class="body">${bracket ? tournamentCard(bracket) : ''}<table class="ftc">${scoreRows(r, b, totals, true)}</table><div class="btns"><button id="freview"${bracket ? '' : ' class="primary"'}>Review and annotate (V)</button><button id="fclose">Close</button></div><div style="color:var(--dim);margin-top:6px;text-align:center">Press R to reset the field.</div></div>`;
     $('freview').onclick = openReview; $('fclose').onclick = () => { finalClosed = true; };
+    $('fnext')?.addEventListener('click', () => { if (!bracket) return; if (isOver(bracket)) setBracket(newBracket()); else { advance(bracket); saveBracket(bracket); paintBracket(); stopMatch(); } });
   }
   $('pad').textContent = (() => { const who = bots.find(q => q.driver === 'pad1'); return `Controller: ${pad ? pad.id.slice(0, 28) : 'not connected'}${who ? `, drives ${who.plate}` : ''}`; })();
-  // Persistent status bar: single controller + keyboard + who drives what
-  const sb = $('statusbar');
-  const kbDriver = bots.find(b => b.driver === 'keyboard');
-  const kbActive = keyboardActive();
-  const items: string[] = [];
-  const ctrlWho = bots.find(b => b.driver === 'pad1');
-  const dotCls = pad ? 'dot-ok' : 'dot-off', labelCls = pad ? 'ok' : '';
-  const ctrlLabel = pad ? pad.id.slice(0, 28) : 'not connected';
-  const ctrlDrives = ctrlWho ? ` → <b>${ctrlWho.plate}</b>` : '';
-  items.push(`<span class="sb-item"><span class="sb-dot ${dotCls}"></span><span class="${labelCls}">Controller: ${ctrlLabel}${ctrlDrives}</span></span>`);
-  const kbDotCls = kbActive ? 'dot-kb' : (kbDriver ? 'dot-ok' : 'dot-off');
-  const kbLabel = kbDriver ? ` → <b>${kbDriver.plate}</b>` : ' (not assigned)';
-  const kbCls = kbDriver ? 'ok' : '';
-  items.push(`<span class="sb-item"><span class="sb-dot ${kbDotCls}"></span><span class="${kbCls}">Keyboard WASD${kbLabel}</span></span>`);
-  sb.innerHTML = items.join('<span style="color:var(--line)">|</span>');
-  const humans = bots.filter(q => q.driver !== 'planner').map(q => q.plate), who = humans.length ? `Drivers of ${humans.join(' and ')}, you have the controls. The planner drives the other robots.` : 'The planner drives every robot.';
-  const text = loadMsg ?? (startAt ? 'This MATCH begins in 3, 2, 1…'
-    : sim.phase === 'pre' ? `Press Play or Enter to begin<small>Click a gear icon or right-click a robot to configure it.${pathsSel.value === 'on' ? ` The dashed orange line is the AUTO plan of ${bots[focus()].plate}.` : ''}</small>`
-    : sim.phase === 'transition' ? `Drivers, pick up your controllers<small>${who}</small>`
+  const padWho = bots.find(q => q.driver === 'pad1'), kb = bots.find(q => q.driver === 'keyboard') ?? (pad ? undefined : padWho);
+  const item = (on: boolean, label: string, who?: string) => `<span class="sb-item${on ? ' on' : ''}"><i></i>${label}${who ? ` <span>drives ${who}</span>` : ''}</span>`;
+  const status = item(!!pad, pad ? pad.id.slice(0, 28) : 'No controller', pad ? padWho?.plate : undefined) + item(!!kb, 'Keyboard', kb?.plate);
+  if ($('statusbar').dataset.html !== status) { $('statusbar').dataset.html = status; $('statusbar').innerHTML = status; }
+  paintDriverHud();
+  const humans = bots.filter(q => q.driver !== 'planner').map(q => q.plate), who = humans.length ? `${humans.join(' and ')}, you have the controls. The planner drives the other robots.` : 'The planner drives every robot.';
+  const play = '<button class="primary" data-play>Start the MATCH</button><kbd>Enter</kbd>';
+  const text = loadMsg ?? (startAt ? '<b>3, 2, 1…</b>'
+    : sim.phase === 'pre' && bracket ? `<span class="eyebrow">${ROUNDS[bracket.round]} · ${TIERS[bracket.round].name}</span><b>32294 vs ${bracket.plates[bracket.round].join(' & ')}</b><small>Blue: ${TIERS[bracket.round].blurb}.</small><div class="go">${play}</div>`
+    : sim.phase === 'pre' ? `<b>Ready</b><small>Right-click a robot or use a gear to set it up.${pathsSel.value === 'on' ? ` The dashed orange line is ${bots[focus()].plate}'s AUTO plan.` : ''}</small><div class="go">${play}</div>`
+    : sim.phase === 'transition' ? `<b>Pick up your controllers</b><small>${who}</small>`
     : null);
-  banner.classList.toggle('hidden', !text || editing >= 0 || editor.active); if (text) banner.innerHTML = text;
+  banner.classList.toggle('hidden', !text || editing >= 0 || editor.active);
+  // The banner is rebuilt only when its text changes: a button replaced between a press and its release gets no click.
+  if (text && banner.dataset.text !== text) { banner.dataset.text = text; banner.innerHTML = text; }
   // The scoreboard moves right when, centered, it would reach the control bar.
   document.body.classList.toggle('narrow', innerWidth / 2 - $('top').offsetWidth / 2 < $('dock').getBoundingClientRect().right + 12);
   paintTransport();
@@ -902,11 +803,15 @@ function paintGhost(me: Sim, plan: ReturnType<typeof previewAuto> | null) {
   view.showGhost({ x: at.x, z: at.z, heading: at.heading }, me.cfg, into, out);
 }
 
-let last = performance.now(), acc = 0, frame = 0, autoPlan: ReturnType<typeof previewAuto> | null = null, autoPlanKey = '';
+/** With no controller connected, the keyboard drives the controller's robot, unless another robot has the keyboard. */
+const keysForPad = () => (bots.some(q => q.driver === 'keyboard') ? NO_INPUT : keyboardNow);
+let keyboardNow: Inputs = NO_INPUT;
+let last = performance.now(), acc = 0, frame = 0, carriedWas = 0, autoPlan: ReturnType<typeof previewAuto> | null = null, autoPlanKey = '';
 function tick(now: number) {
   const frameDt = (now - last) / 1000; acc = Math.min(acc + frameDt, 0.05); last = now;
-  const inF = readInput();
-  if (inF.reset) reset(); if (inF.start) startMatch();
+  const inF = readInput(); keyboardNow = inF.keyboard;
+  // A headset has no keyboard: its A button also resets the FIELD after the MATCH.
+  if (inF.reset || (inF.start && view.vr && sim.phase === 'post')) reset(); else if (inF.start) startMatch();
   if (inF.mark && recorder.trace.frames.length) { const fr = recorder.trace.frames[recorder.trace.frames.length - 1]; review.mark(recorder.trace, fr.t); }
   if (inF.review) { if (review.active) goLive(); else openReview(); }
   if (inF.play) playPause();
@@ -924,7 +829,8 @@ function tick(now: number) {
     if (inF.next && !rightTurret) skip(1);
   }
   if (sim.phase === 'post' && !traceSaved) { traceSaved = true; void saveTrace(); void countMatch(); }
-  if (review.active) { review.tick(frameDt); acc = 0; if (frame++ % 6 === 0) hud(inF.pad); requestAnimationFrame(tick); return; }
+  if (sim.phase === 'post' && bracket && !recorded) { recorded = true; record(bracket, sim.score('red').total, sim.score('blue').total); saveBracket(bracket); paintBracket(); }
+  if (review.active) { review.tick(frameDt); acc = 0; if (frame++ % 6 === 0) hud(inF.pad); return; }
   if (startAt && now >= startAt) { startAt = 0; sim.start(); }
   for (const e of sim.events.splice(0)) audio.play(e);
   if (inF.camera) { view.cycleCamera(); camSel.value = view.mode; }
@@ -935,8 +841,9 @@ function tick(now: number) {
     const inAuto = sim.phase === 'auto', inputs: Inputs[] = [], flags: boolean[] = [], drivers: (Coach | null)[] = [];
     bots.forEach((b, i) => {
       if (i >= sim.robots.length) return; // robot not on field for this opponent count
-      const human = !inAuto && b.driver !== 'planner', src = human ? (b.driver === 'keyboard' ? inF.keyboard : inF.pad?.inputs ?? NO_INPUT) : null;
-      if (src) inputs.push({ ...(b.stickFrame === 'field' ? fieldCentric(src, i) : src), human: true }); else inputs.push(inAuto && b.auto === 'none' ? NO_INPUT : coaches[i].update(sim.view(i), DT));
+      const human = !inAuto && b.driver !== 'planner', src = human ? (b.driver === 'keyboard' ? inF.keyboard : inF.pad?.inputs ?? keysForPad()) : null;
+      const look = i === fi && Number.isFinite(view.chaseYaw) ? view.chaseYaw : sim.robots[i].alliance === 'red' ? 0 : Math.PI;
+      if (src) inputs.push({ ...(b.stickFrame === 'field' ? fieldCentric(src, i, look) : src), human: true }); else inputs.push(inAuto && b.auto === 'none' ? NO_INPUT : coaches[i].update(sim.view(i), DT));
       flags.push(!human); drivers.push(human ? null : coaches[i]);
     });
     sim.step(inputs, flags); referee?.update(sim, DT); recorder.record(sim, drivers, DT); acc -= DT;
@@ -950,6 +857,8 @@ function tick(now: number) {
   for (const m of sim.messages) if (!toasted.has(m)) { toasted.add(m); if (/^(REFEREE:|G\d{3})/.test(m.text)) toast(m.text, 'ref'); }
   // The shot preview and the planned path belong to the focus robot. A human driver gets the preview, and a program gets the path.
   const me = sim.view(fi), humanNow = bots[fi].driver !== 'planner' && sim.phase !== 'auto', next = me.carried[0], dual = me.cfg.shooter.type === 'dual';
+  if (sim.phase === 'teleop' && bots[fi].driver === 'pad1' && me.carried.length !== carriedWas) rumble(me.carried.length < carriedWas);
+  carriedWas = me.carried.length;
   const kind = !next ? null : dual ? (me.carried.includes('pollen') ? 'pollen' : 'nectar') : next === 'pollen' ? 'pollen' : 'nectar';
   const paths = pathsSel.value === 'on';
   const showTraj = trajSel.value === 'on';
@@ -964,6 +873,20 @@ function tick(now: number) {
   view.showAutoPlan(showPlan ? autoPlan : null, autoPlanKey);
   paintGhost(pv, showPlan ? autoPlan : null);
   if (frame++ % 6 === 0) hud(inF.pad);
-  requestAnimationFrame(tick);
 }
-void CAMERAS; requestAnimationFrame(tick);
+view.loop(tick);
+
+// The built site works offline and installs as an app. The dev server doesn't register it, so edits always load.
+if (import.meta.env.PROD && 'serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js', { scope: '/sim/' }).catch(() => {});
+
+// In a headset, you drive 32294 from the red alliance area with the headset's controllers.
+const vrBtn = $<HTMLButtonElement>('tvr');
+void (navigator as Navigator & { xr?: XRSystem }).xr?.isSessionSupported('immersive-vr').then(ok => vrBtn.classList.toggle('hidden', !ok)).catch(() => {});
+vrBtn.onclick = async () => {
+  vrBtn.blur(); if (review.active) goLive(); closeModals(); closeConfig(); if (editor.active) editor.close();
+  try {
+    const session = await view.enterVR(); setXRSession(session);
+    session.addEventListener('end', () => setXRSession(null));
+    if (bots[0].driver !== 'pad1') { bots[0].driver = 'pad1'; saveBots(bots); toast('32294 now drives with the headset controllers.'); }
+  } catch (err) { toast(`Can't start VR: ${(err as Error).message}`, 'ref'); }
+};
