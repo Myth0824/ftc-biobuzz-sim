@@ -49,7 +49,7 @@ it. On a Quest, the headset button in the control bar drives from the alliance a
 | LT and RT | Place POLLEN and place NECTAR in a FLOWER |
 | Gear icon, or a right-click on a robot | Open the robot config |
 | Enter, R, C, M, V | Start, reset, change the camera, mark a moment, and review the match |
-| Space, left arrow, right arrow | Play or pause, and go to the previous or the next mark |
+| Space, `[`, `]` | Play or pause, and go to the previous or the next mark |
 
 To run the tests, run `npm test`. They cover the HIVE calibration, the drivetrain, the behavior-tree runtime, the AUTO trees, the referee, and
 full scripted matches, without a browser.

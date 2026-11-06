@@ -567,7 +567,7 @@ export class View {
     if (path && path.length > 1) this.pathLine.geometry.setAttribute('position', new THREE.Float32BufferAttribute(path.flatMap(q => [q.x, 0.012, q.z]), 3));
     while (this.robotGroups.length < sim.robots.length) this.robotGroups.push(this.buildRobot());
     this.robotGroups.forEach((g, i) => { g.visible = i < sim.robots.length; if (g.visible) { const r = sim.robots[i]; this.syncRobot(g, sim.view(i), this.plates[i] ?? `${r.alliance === 'red' ? 'R' : 'B'}${r.slot}`); } });
-    const p = sim.robot.translation(), th = sim.heading;
+    const p = sim.robot.translation();
     this.stepGhost(performance.now());
 
     const n: Record<BallKind, number> = { pollen: 0, nectar_red: 0, nectar_blue: 0 }, xf = this.ballXf;

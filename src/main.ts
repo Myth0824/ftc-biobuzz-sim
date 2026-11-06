@@ -6,7 +6,7 @@ import RAPIER from '@dimforge/rapier3d-compat';
 import { AUTO_TREES, SOLO_AUTO, autoFor, previewAuto } from './auto/onboard';
 import type { Coach } from './auto/coach';
 import { FieldEditor } from './field-editor';
-import { getBindings, readInput, rumble, setXRSession } from './input';
+import { readInput, rumble, setXRSession } from './input';
 import { View } from './render/view';
 import { Review } from './review';
 import { BOT_IDS, loadBots, saveBots } from './setup';
@@ -117,15 +117,14 @@ function tick(now: number) {
   const frames = app.recorder.trace.frames; if (inF.mark && frames.length) review.mark(app.recorder.trace, frames[frames.length - 1].t);
   if (inF.review) { if (review.active) goLive(); else openReview(); }
   if (inF.play) playPause();
-  // The arrows serve three masters: while paused they pan and zoom the camera; in TELEOP with a keyboard driver they
-  // steer the turret, while the turret is bound to them; otherwise they skip timeline marks.
-  const b = getBindings(), kbTeleop = app.sim.phase === 'teleop' && app.bots.some(q => q.driver === 'keyboard');
+  // The arrows only drive: while live they steer the turret / shoot / intake (via the held keys), and while paused
+  // they pan and zoom the camera. They never skip a mark or open the review. Previous/next mark are the `[` / `]`
+  // keys (rebindable in Key bindings), so turning the turret can never restart into replay.
   if (app.livePaused) {
-    for (const [on, key] of [[inF.prev, 'ArrowLeft'], [inF.next, 'ArrowRight'], [inF.camUp, 'ArrowUp'], [inF.camDown, 'ArrowDown']] as const) if (on) view.adjustView(key);
-  } else {
-    if (inF.prev && !(kbTeleop && b.turretLeft === 'ArrowLeft')) skip(-1);
-    if (inF.next && !(kbTeleop && b.turretRight === 'ArrowRight')) skip(1);
+    for (const [on, key] of [[inF.camLeft, 'ArrowLeft'], [inF.camRight, 'ArrowRight'], [inF.camUp, 'ArrowUp'], [inF.camDown, 'ArrowDown']] as const) if (on) view.adjustView(key);
   }
+  if (inF.prev) skip(-1);
+  if (inF.next) skip(1);
   if (app.sim.phase === 'post') finishMatch();
   if (review.active) { review.tick(frameDt); acc = 0; if (frame++ % 6 === 0) hud(inF.pad); return; }
   if (app.startAt && now >= app.startAt) { app.startAt = 0; app.sim.start(); }

@@ -5,6 +5,7 @@ export interface KeyBindings {
   turnLeft: string; turnRight: string;
   shoot: string; intake: string; placeFlower: string;
   turretLeft: string; turretRight: string;
+  prevMark: string; nextMark: string;
 }
 
 export const DEFAULT_BINDINGS: KeyBindings = {
@@ -12,6 +13,10 @@ export const DEFAULT_BINDINGS: KeyBindings = {
   turnLeft: 'KeyQ', turnRight: 'KeyE',
   shoot: 'ArrowUp', intake: 'ArrowDown', placeFlower: 'KeyZ',
   turretLeft: 'ArrowLeft', turretRight: 'ArrowRight',
+  // Previous/next timeline mark. Deliberately NOT the arrow keys: the arrows
+  // only drive (turret/shoot/intake), and pan/zoom while paused, so that
+  // turning the turret can never open the review/replay.
+  prevMark: 'BracketLeft', nextMark: 'BracketRight',
 };
 
 const BINDING_KEY = 'biobuzz.keybindings.v1';
@@ -35,11 +40,13 @@ export const BINDING_LABELS: Record<keyof KeyBindings, string> = {
   shoot: 'Shoot', intake: 'Intake',
   placeFlower: 'Place in FLOWER',
   turretLeft: 'Turret left', turretRight: 'Turret right',
+  prevMark: 'Previous mark', nextMark: 'Next mark',
 };
 
 /** Converts a KeyboardEvent.code to a short readable label. */
 const CODE_LABELS: Record<string, string> = {
   ArrowUp: '↑', ArrowDown: '↓', ArrowLeft: '←', ArrowRight: '→',
+  BracketLeft: '[', BracketRight: ']',
   Space: 'Space', ShiftLeft: 'L-Shift', ShiftRight: 'R-Shift',
   ControlLeft: 'L-Ctrl', ControlRight: 'R-Ctrl', AltLeft: 'L-Alt', AltRight: 'R-Alt',
 };
@@ -125,6 +132,10 @@ addEventListener('keydown', e => { if (!e.repeat && !(e.target as HTMLElement | 
 // Keys held now, for driving.
 const held = new Set<string>();
 addEventListener('keydown', e => { if (!(e.target as HTMLElement | null)?.closest?.('input:not([type=range]), select, textarea, [contenteditable]')) held.add(e.code); });
+// If the timeline range slider has focus, the browser would move it natively
+// on an arrow key, opening the review. Arrows must only drive the robot, so
+// keep the slider's native arrow handling out of the way.
+addEventListener('keydown', e => { if (e.code.startsWith('Arrow') && (e.target as HTMLElement | null)?.id === 'scrub') e.preventDefault(); });
 addEventListener('keyup', e => held.delete(e.code));
 // A key released while the window is in the background sends no keyup.
 addEventListener('blur', () => held.clear());
@@ -157,10 +168,10 @@ export interface Frame {
   /** Keyboard driving inputs (always present, zero when no keys held). */
   keyboard: Inputs;
   start: boolean; reset: boolean; camera: boolean; mark: boolean; review: boolean;
-  /** Raw arrow keys. While paused the page pans/zooms the camera; otherwise they skip timeline marks, unless the keyboard driver's turret is bound to them. */
+  /** The previous/next timeline mark keys (the rebindable prevMark/nextMark bindings, default `[` and `]`). */
   play: boolean; prev: boolean; next: boolean;
-  /** Raw Up/Down arrow keys; the page zooms the camera with them while paused. */
-  camUp: boolean; camDown: boolean;
+  /** Raw arrow keys; the page pans/zooms the camera with them while paused. They never skip or open the review. */
+  camLeft: boolean; camRight: boolean; camUp: boolean; camDown: boolean;
 }
 
 let xrSession: XRSession | null = null;
@@ -201,18 +212,19 @@ export function rumble(strong: boolean) {
   raw?.vibrationActuator?.playEffect('dual-rumble', { duration: strong ? 90 : 40, strongMagnitude: strong ? 0.6 : 0, weakMagnitude: strong ? 0.3 : 0.5 }).catch(() => {});
 }
 
-/** Reads the app-level one-shot keys and the controller. `prev`/`next`/`camUp`/`camDown` are the raw arrow keys; the page decides what they mean (timeline, camera pan, or the turret) from the phase and the bindings. */
+/** Reads the app-level one-shot keys and the controller. `prev`/`next` are the rebindable mark keys; the arrows are only the raw camera keys while paused, and otherwise only driving (via `keyboardInputs()`). */
 export function readInput(): Frame {
   let start = pressed.has('Enter'), camera = pressed.has('KeyC');
   const reset = pressed.has('KeyR'), mark = pressed.has('KeyM'), review = pressed.has('KeyV'),
         play = pressed.has('Space'),
-        prev = pressed.has('ArrowLeft'), next = pressed.has('ArrowRight');
-  const camUp = pressed.has('ArrowUp'), camDown = pressed.has('ArrowDown');
+        prev = pressed.has(bindings.prevMark), next = pressed.has(bindings.nextMark);
+  const camLeft = pressed.has('ArrowLeft'), camRight = pressed.has('ArrowRight'),
+        camUp = pressed.has('ArrowUp'), camDown = pressed.has('ArrowDown');
   pressed.clear();
 
   // In a headset, its controllers drive.
   const xr = xrSession && xrPad(xrSession);
-  if (xr) return { pad: xr.pad, keyboard: keyboardInputs(), start: start || xr.start, reset, camera: false, mark, review, play, prev, next, camUp, camDown };
+  if (xr) return { pad: xr.pad, keyboard: keyboardInputs(), start: start || xr.start, reset, camera: false, mark, review, play, prev, next, camLeft, camRight, camUp, camDown };
 
   // Only the first connected controller drives.
   const connected = [...navigator.getGamepads()].filter((g): g is Gamepad => !!g && g.connected);
@@ -246,5 +258,5 @@ export function readInput(): Frame {
     };
   }
 
-  return { pad, keyboard: keyboardInputs(), start, reset, camera, mark, review, play, prev, next, camUp, camDown };
+  return { pad, keyboard: keyboardInputs(), start, reset, camera, mark, review, play, prev, next, camLeft, camRight, camUp, camDown };
 }
