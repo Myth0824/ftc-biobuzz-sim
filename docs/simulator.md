@@ -221,6 +221,31 @@ source calls `follow` or `followPath`. A curve becomes six waypoints. Pedro's 14
 about its center, and a source whose start pose is on the blue half is rotated 180° into red's frame. Dropping a
 `.java` file on the page imports it too.
 
+For a routine split across files, select or drop **all its Java files together**. If the selection contains more
+than one `@Autonomous` OpMode, choose **Routine to import**, then **Import selected routine**. Companion field
+constants, path declarations, and simple numeric/pose helpers made from `return` expressions and `if`/`else` are
+resolved across files; the upload order does not matter. Only the chosen routine's follow calls are imported.
+Other uploaded OpModes are excluded from evaluation. A missing followed path stops the import and asks for its
+companion files, rather than silently importing a different route. Syntax errors identify the file and line.
+
+For team 32294's match autos:
+
+1. Open the red robot's config and click **Import Pedro Pathing auto**.
+2. Select `ParkAuto.java` **or** `LaunchParkAuto.java`, together with `AutoPaths.java` and `Field.java`. Select both
+   OpModes together if you want to choose the routine afterward. `BiobuzzAuto.java` is optional for this preview.
+   These files live under `TeamCode/src/main/java/org/firstinspires/ftc/teamcode/` in the robot repo; all except
+   `Field.java` are in `opmodes/`. When the files are in different folders, copy the needed files into a temporary
+   folder first, then select them together, or drag them from a file search result.
+3. Click **Edit AUTO paths** to see the imported route on the FIELD. Repeat import to add the other routine.
+
+The team helpers are previewed with the **RED** alliance default. The simulator runs blue robots' plans rotated
+180° as usual; the import API also accepts `{ alliance: 'BLUE' }` and normalizes the source back to red's frame.
+Runtime gamepad choices, start delays, hardware calls, and arbitrary Java control flow are not executed. A shared
+base class's lifecycle is not simulated. A curve is still sampled into six waypoints and followed by the simulator,
+so the preview does not reproduce Pedro's tuned follower or validate the physical robot. `LaunchParkAuto` currently
+contains no firing call, so its import contains only driving. The importer handles a limited declaration subset,
+not general Java object construction or multiple independently configured instances of one path class.
+
 It also reads the mechanism calls, by their names, in source order. A call on an intake, roller, or collector
 (`intake.setPower(1)`, `robot.startIntake()`) turns the intake on, and `stop`, `off`, `reverse`, or a power of 0 or less
 turns it off: the paths and waits while it runs go in a `parallel` with `intake.run`. An intake started right after a
