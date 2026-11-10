@@ -77,8 +77,12 @@
   <label id="bcslewrow">Turret turn rate, °/s <input id="bcturretslew" type="number" min="10" max="3600" step="10" placeholder="instant"></label>
   <label>AUTO plan <select id="bcauto"></select></label>
   <button id="bcedit" type="button" title="Opens the AUTO editor on this robot. Plans are written in red's frame, and blue robots run them rotated 180°.">Edit AUTO paths</button>
-  <button id="bcpedro" type="button" title="Reads a Pedro Pathing OpMode (.java) into a new AUTO plan for this robot: its paths, and its intake, launches, and waits. You can also drop the file on the page.">Import Pedro Pathing auto</button>
-  <input id="bcpedrofile" type="file" accept=".java" hidden>
+  <button id="bcpedro" type="button" title="Select an OpMode and its companion .java files together to import paths, intake, launches, and waits. You can also drop the files on the page.">Import Pedro Pathing auto</button>
+  <input id="bcpedrofile" type="file" accept=".java" multiple hidden>
+  <div id="bcpedrochoice" class="hidden">
+    <label>Routine to import <select id="bcpedroentry"></select></label>
+    <button id="bcpedroconfirm" type="button">Import selected routine</button>
+  </div>
   <label id="bcplanrow">TELEOP plan <select id="bcplan"><option value="0">Keep tipping</option><option value="30">FLOWERS from 30 s</option><option value="45">FLOWERS from 45 s</option><option value="66">FLOWERS from 66 s</option></select></label>
   <div class="errhead"><span title="How much one shot differs from the next, as one standard deviation. Measure it: launch 20 elements from one spot.">Launcher error, 1 SD</span><span class="chips"><button type="button" data-err="1">1x</button><button type="button" data-err="3">3x</button><button type="button" data-err="5">5x</button></span></div>
   <label>Elevation, ° <input id="bcelev" type="number" min="0" max="15" step="0.1"></label>

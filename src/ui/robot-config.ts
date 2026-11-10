@@ -4,7 +4,7 @@
  * plan for a red robot.
  */
 import { AUTO_PROBLEMS, AUTO_TREES, addAutoTree, autoStart } from '../auto/onboard';
-import { importPedro } from '../auto/pedro';
+import { importPedroProject, listPedroOpModes, type PedroJavaFile } from '../auto/pedro';
 import { BOT_IDS, MAIN_ROBOT_INDEX, REF_ERR, assignDriver, defaultBot, describe, describeLines, metaBot, sanitize, saveBots, startSide, type BotSetup, type DriverKind } from '../setup';
 import { TIERS } from '../tournament';
 import { massFromInput, massToInput, sizeFromInput, sizeToInput, speedFromInput, speedToInput } from '../units';
@@ -50,6 +50,7 @@ export function openConfig(i: number) {
   if (app.bracket && i >= 2) { toast(`In a tournament the bracket sets the blue robots: ${TIERS[app.bracket.round].blurb}.`); return; }
   if (review.active) review.exit();
   closeModals(); app.editing = i;
+  $('bcpedrochoice').classList.toggle('hidden', !pendingPedro || pendingPedro.robot !== i || i >= 2);
   const b = app.bots[i], isMain = i === MAIN_ROBOT_INDEX, us = app.units === 'us';
   $('bchead').textContent = `Robot config: ${b.plate} (${BOT_IDS[i]}), ${i < 2 ? 'red' : 'blue'} alliance, ${startSide(i)} start`; bc.auto.innerHTML = autoOptions(i);
   bc.plate.value = b.plate; bc.plate.disabled = isMain;
@@ -93,13 +94,36 @@ function applyPreset(make: (i: number) => BotSetup) {
   const b = app.bots[i]; app.bots[i] = { ...make(i), plate: b.plate, driver: b.driver, stickFrame: b.stickFrame }; saveBots(app.bots); reset(); openConfig(i);
 }
 
-/** Reads a Pedro Pathing OpMode into a saved AUTO plan, and gives it to red robot `i`. */
-async function importPedroFile(file: File, i: number) {
+let pendingPedro: { files: PedroJavaFile[]; robot: number } | null = null;
+
+/** Reads one chosen routine into a saved AUTO plan, and gives it to red robot `i`. */
+async function importPedroFiles(files: PedroJavaFile[], i: number, entryFile?: string) {
   try {
-    const { tree, warnings } = await importPedro(await file.text(), file.name);
+    const { tree, warnings } = await importPedroProject(files, { entryFile });
     addAutoTree(tree); saveUserTree(tree); app.bots[i].auto = String(tree.id); saveBots(app.bots); reset(); openConfig(i);
+    pendingPedro = null; $('bcpedrochoice').classList.add('hidden');
     toast([`Imported ${tree.name} for ${app.bots[i].plate}.`, ...warnings].join(' '));
-  } catch (err) { toast(`Can't import ${file.name}: ${(err as Error).message}`, 'ref'); }
+  } catch (err) { toast(`Can't import ${entryFile ?? files[0].name}: ${(err as Error).message}`, 'ref'); }
+}
+
+/** Keeps companion sources together; multiple OpModes need an explicit routine choice. */
+async function readPedroFiles(files: File[], i: number) {
+  pendingPedro = null; $('bcpedrochoice').classList.add('hidden');
+  if (i < 0 || i >= 2 || !files.length) return;
+  const invalid = files.find(f => !/\.java$/i.test(f.name));
+  if (invalid) { toast(`Select an OpMode and its companion .java files. ${invalid.name} isn't a Java file.`, 'ref'); return; }
+  try {
+    const sources = await Promise.all(files.map(async f => ({ name: f.name, java: await f.text() })));
+    if (sources.length === 1) { await importPedroFiles(sources, i); return; }
+    const entries = await listPedroOpModes(sources);
+    if (!entries.length) throw new Error('Include a concrete @Autonomous OpMode with the companion files.');
+    if (entries.length === 1) { await importPedroFiles(sources, i, entries[0].fileName); return; }
+    pendingPedro = { files: sources, robot: i };
+    const select = $<HTMLSelectElement>('bcpedroentry');
+    select.replaceChildren(...entries.map(e => new Option(e.name, e.fileName)));
+    openConfig(i); $('bcpedrochoice').classList.remove('hidden'); select.focus();
+    toast(`Read ${sources.length} Java files. Choose the routine to import.`);
+  } catch (err) { toast(`Can't read Pedro files: ${(err as Error).message}`, 'ref'); }
 }
 
 export function initRobotConfig() {
@@ -112,12 +136,13 @@ export function initRobotConfig() {
   $('bcdone').onclick = closeConfig;
   $('bcdefault').onclick = () => applyPreset(metaBot); $('bcbaseline').onclick = () => applyPreset(defaultBot);
   $('bcpedro').onclick = () => $('bcpedrofile').click();
-  $<HTMLInputElement>('bcpedrofile').onchange = e => { const input = e.target as HTMLInputElement, file = input.files?.[0]; input.value = ''; if (file && app.editing >= 0) void importPedroFile(file, app.editing); };
-  // A .java file dropped on the page imports for the red robot whose setup is open, or for your robot.
+  ownKeys($('bcpedroentry'));
+  $('bcpedroconfirm').onclick = () => { if (pendingPedro && pendingPedro.robot === app.editing) void importPedroFiles(pendingPedro.files, pendingPedro.robot, $<HTMLSelectElement>('bcpedroentry').value); };
+  $<HTMLInputElement>('bcpedrofile').onchange = e => { const input = e.target as HTMLInputElement, files = Array.from(input.files ?? []); input.value = ''; if (files.length) void readPedroFiles(files, app.editing); };
+  // Java files dropped together import for the red robot whose setup is open, or for your robot.
   addEventListener('dragover', e => { if (e.dataTransfer?.types.includes('Files')) e.preventDefault(); });
   addEventListener('drop', e => {
-    const file = e.dataTransfer?.files[0]; if (!file) return; e.preventDefault();
-    if (!/\.java$/i.test(file.name)) { toast(`Drop a Pedro Pathing OpMode's .java file to import it. ${file.name} isn't one.`); return; }
-    void importPedroFile(file, app.editing === 1 ? 1 : 0);
+    const files = Array.from(e.dataTransfer?.files ?? []); if (!files.length) return; e.preventDefault();
+    void readPedroFiles(files, app.editing === 1 ? 1 : 0);
   });
 }

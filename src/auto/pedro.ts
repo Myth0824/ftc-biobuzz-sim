@@ -1,7 +1,7 @@
 /**
  * Reads a Pedro Pathing OpMode's Java source and writes an AUTO tree that drives the same paths. It understands both
  * Pedro APIs: the 1.x builder (`new BezierLine`, `pathBuilder().addPath(...).setLinearHeadingInterpolation(...)`) and the
- * 2.x one (`line(a, b).linear(a, b)`, `curve(...)`, `.constant(h)`, `.tangent()`). It doesn't run the OpMode: a Java
+ * 2.x/3.x one (`line(a, b).linear(a, b)`, `curve(...)`, `.constant(h)`, `.tangent()`). It doesn't run the OpMode: a Java
  * parser (java-parser, the one behind prettier-plugin-java) gives the file's structure, a small evaluator works out the
  * numbers, poses, and paths that the file declares, and the paths run in the order that the source follows them. It
  * also reads the mechanism calls between and inside the paths, by their names: an intake that runs while a path is
@@ -28,7 +28,9 @@ interface Opaque { kind: 'opaque' | 'math' }
 interface Lambda { kind: 'lambda'; events: Mech[] }
 /** A name that isn't declared yet. A field access on it can still find a declared path, as in `paths.score`. */
 interface Name { kind: 'name'; name: string }
-type Value = number | boolean | PPose | Segment | Chain | Opaque | Lambda | Name | undefined;
+interface Namespace { kind: 'namespace'; name: string }
+interface PureFunction { kind: 'function'; invoke: (on: Value | null, args: Value[]) => Value }
+type Value = number | boolean | PPose | Segment | Chain | Opaque | Lambda | Name | Namespace | PureFunction | undefined;
 
 const OPAQUE: Opaque = { kind: 'opaque' }, MATH: Opaque = { kind: 'math' };
 const isPose = (v: Value): v is PPose => typeof v === 'object' && v.kind === 'pose';
@@ -60,7 +62,7 @@ class Expr {
   constructor(private toks: Tok[], private env: Map<string, Value>) {}
 
   static eval(src: string, env: Map<string, Value>): Value {
-    const e = new Expr(tokenize(src), env), v = e.sum();
+    const e = new Expr(tokenize(src), env), v = e.comparison();
     if (e.i < e.toks.length) throw new Error(`unexpected "${e.toks[e.i].v}"`);
     return v;
   }
@@ -69,10 +71,19 @@ class Expr {
   private eat(v: string) { if (!this.peek(v)) throw new Error(`expected "${v}"`); this.i++; }
   private args(): Value[] {
     this.eat('('); const out: Value[] = [];
-    while (!this.peek(')')) { out.push(this.sum()); if (!this.peek(')')) this.eat(','); }
+    while (!this.peek(')')) { out.push(this.comparison()); if (!this.peek(')')) this.eat(','); }
     this.eat(')'); return out;
   }
 
+  private comparison(): Value {
+    const v = this.sum();
+    if (this.peek('=') || this.peek('!')) {
+      const op = this.toks[this.i++].v; this.eat('='); const r = this.sum();
+      const equal = typeof v === 'object' && v.kind === 'namespace' && typeof r === 'object' && r.kind === 'namespace' ? v.name === r.name : v === r;
+      return op === '=' ? equal : !equal;
+    }
+    return v;
+  }
   private sum(): Value {
     let v = this.product();
     while (this.peek('+') || this.peek('-')) { const op = this.toks[this.i++].v, r = this.product(); v = op === '+' ? num(v, 'a sum') + num(r, 'a sum') : num(v, 'a difference') - num(r, 'a difference'); }
@@ -96,7 +107,7 @@ class Expr {
     const t = this.toks[this.i++];
     if (!t) throw new Error('the expression ends early');
     if (t.t === 'num') return t.v;
-    if (t.t === 'op' && t.v === '(') { const v = this.sum(); this.eat(')'); return v; }
+    if (t.t === 'op' && t.v === '(') { const v = this.comparison(); this.eat(')'); return v; }
     if (t.t !== 'id') throw new Error(`unexpected "${t.v}"`);
     if (t.v === 'new') {
       let type = (this.toks[this.i++] as { v: string }).v;
@@ -106,7 +117,7 @@ class Expr {
     }
     if (t.v === 'true' || t.v === 'false') return t.v === 'true';
     if (t.v === 'Math') return MATH;
-    if (this.peek('(')) return call(null, t.v, this.args());
+    if (this.peek('(')) return call(null, t.v, this.args(), this.env);
     return this.env.get(t.v) ?? { kind: 'name', name: t.v };
   }
 
@@ -114,12 +125,15 @@ class Expr {
     for (;;) {
       if (!this.peek('.')) return resolve(v, this.env);
       this.i++; const name = (this.toks[this.i++] as { v: string }).v;
-      if (this.peek('(')) { v = call(resolve(v, this.env), name, this.args()); continue; }
+      if (this.peek('(')) { v = call(resolve(v, this.env), name, this.args(), this.env); continue; }
       // A field access: Math.PI, a constant on a class, or a path on a holder object such as `paths.score`.
       if (v === MATH) v = name === 'PI' ? Math.PI : name === 'E' ? Math.E : undefined;
       else if (isPose(v) && (name === 'x' || name === 'y')) v = v[name];
       else if (isPose(v) && name === 'heading') v = v.h;
-      else v = this.env.get(name) ?? { kind: 'name', name };
+      else if (typeof v === 'object' && (v.kind === 'name' || v.kind === 'namespace')) {
+        const qualified = `${v.name}.${name}`;
+        v = this.env.get(qualified) ?? this.env.get(name) ?? { kind: 'name', name: qualified };
+      } else v = this.env.get(name) ?? { kind: 'name', name };
     }
   }
 }
@@ -139,7 +153,11 @@ function construct(type: string, a: Value[]): Value {
   return OPAQUE;
 }
 
-function call(on: Value | null, name: string, a: Value[]): Value {
+function call(on: Value | null, name: string, a: Value[], env?: Map<string, Value>): Value {
+  const namespace = typeof on === 'object' && on?.kind === 'namespace' ? on.name : '';
+  const fn = env?.get(`__call_${namespace}.${name}`) ?? env?.get(`__call_${namespace.split('.').slice(0, -1).join('.')}.${name}`) ??
+    (on === null || on === OPAQUE ? env?.get(`__call_${name}`) : undefined);
+  if (typeof fn === 'object' && fn.kind === 'function') return fn.invoke(on, a);
   if (on === MATH) {
     const f: Record<string, (...x: number[]) => number> = { toRadians: d => (d * Math.PI) / 180, toDegrees: r => (r * 180) / Math.PI, sqrt: Math.sqrt, abs: Math.abs, sin: Math.sin, cos: Math.cos, atan2: Math.atan2, hypot: Math.hypot, min: Math.min, max: Math.max };
     if (!f[name]) throw new Error(`Math.${name} isn't supported`);
@@ -260,12 +278,13 @@ interface Call { recv: string; method: string; args: CstNode[]; node: CstNode }
 interface New { type: string; args: CstNode[] }
 
 class Source {
-  readonly env = new Map<string, Value>();
+  readonly env: Map<string, Value>;
   /** The OpMode's own methods, by name, and those of them that follow no path. */
   readonly methods = new Map<string, CstNode>(); readonly helpers = new Set<string>();
   private lambdaNames = new Map<CstNode, string>();
 
-  constructor(readonly text: string, readonly root: CstNode) {
+  constructor(readonly text: string, readonly root: CstNode, env = new Map<string, Value>()) {
+    this.env = env;
     for (const m of nodes(root, 'methodDeclaration')) {
       const name = tokens(child(child(m, 'methodHeader')!, 'methodDeclarator')!).find(t => t.tokenType.name === 'Identifier')?.image, body = child(m, 'methodBody');
       if (!name || !body) continue;
@@ -315,7 +334,9 @@ class Source {
   private lambda(n: CstNode): string {
     let name = this.lambdaNames.get(n);
     if (!name) {
-      name = `__fn${this.lambdaNames.size}`; this.lambdaNames.set(n, name);
+      let index = this.lambdaNames.size;
+      while (this.env.has(`__fn${index}`)) index++;
+      name = `__fn${index}`; this.lambdaNames.set(n, name);
       const events = n.name === 'lambdaExpression' ? this.scan(n).flatMap(e => (e.kind === 'intakeOn' || e.kind === 'intakeOff' || e.kind === 'shoot' ? [e.kind] : []))
         : (() => { const s = (n.children.primarySuffix as CstNode[]).find(x => child(x, 'methodReferenceSuffix'))!, m = tokens(child(s, 'methodReferenceSuffix')!).find(t => t.tokenType.name === 'Identifier')?.image ?? ''; const k = mechanism(this.prefixName(child(n, 'primaryPrefix')!), m, undefined); return k ? [k] : []; })();
       this.env.set(name, { kind: 'lambda', events });
@@ -371,8 +392,18 @@ class Source {
   private followed(args: CstNode[], out: Event[]) {
     for (const a of args) { const v = this.value(a); if (isPath(v)) { out.push({ kind: 'path', name: this.pathName(a) }); return; } }
   }
-  /** The name a followed path goes by: its variable's name, the last part of `paths.score`. */
-  private pathName(a: CstNode) { return this.slice(a).trim().split('.').pop()!; }
+  /** Keep an explicit owner; reject a holder whose member name could refer to multiple companion paths. */
+  private pathName(a: CstNode) {
+    const expr = this.slice(a).trim(), name = expr.split('.').pop()!;
+    if (expr.includes('.') && isPath(this.env.get(expr))) return expr;
+    if (!expr.includes('.') || expr.startsWith('this.')) {
+      const scoped = `${ownerName(this, a)}.${name}`;
+      if (isPath(this.env.get(scoped))) return scoped;
+    }
+    const aliases = [...this.env.keys()].filter(k => k.endsWith(`.${name}`) && isPath(this.env.get(k)));
+    if (aliases.length > 1) throw new Error(`Ambiguous path ${expr}: ${aliases.join(', ')}. Use an explicit class-qualified path or select only its needed companions.`);
+    return name;
+  }
   private slept(name: string, args: CstNode[], out: Event[]) { const v = this.value(args[0]); if (typeof v === 'number') out.push({ kind: 'wait', sec: v * SLEEP[name.toLowerCase()] }); }
 
   /** A timer compared alone in a condition, as `t.seconds() > 1.5`, is a wait. Beside `||` or the follower's check, it is a timeout. */
@@ -389,7 +420,7 @@ class Source {
 }
 
 /** Reads every assignment and declaration of a number, a pose, or a path into `src.env`, in two passes, so that a declaration can use a field that the file declares further down. */
-function declarations(src: Source, warnings: string[]) {
+function declarations(src: Source, warnings: string[], qualified = false) {
   const assigns: [string, CstNode][] = [];
   for (const d of nodes(src.root, 'variableDeclarator')) {
     const name = tokens(child(d, 'variableDeclaratorId')!)[0]?.image, init = child(d, 'variableInitializer'), e = init && child(init, 'expression');
@@ -404,7 +435,17 @@ function declarations(src: Source, warnings: string[]) {
   const changes = nodes(src.root, 'expressionStatement').filter(s => /^\s*[A-Za-z_$][\w$]*\s*\.\s*(set\w*HeadingInterpolation|setReversed|add\w*Callback)\s*\(/.test(src.slice(s)));
   for (let pass = 0; pass < 2; pass++) {
     for (const [name, e] of assigns) {
-      try { const v = Expr.eval(src.expr(e), src.env); if (isPose(v) || isPath(v) || typeof v === 'number') src.env.set(name, typeof v === 'object' ? structuredClone(v) : v); }
+      try {
+        const v = Expr.eval(src.expr(e), qualified ? lexicalEnv(src, e) : src.env);
+        if (isPose(v) || isPath(v) || typeof v === 'number') {
+          const value = typeof v === 'object' ? structuredClone(v) : v;
+          src.env.set(name, value);
+          if (qualified) {
+            const owner = ownerName(src, e);
+            if (owner) src.env.set(`${owner}.${name}`, value);
+          }
+        }
+      }
       catch (err) { if (pass === 1 && /\b(Pose|Bezier|line|curve|pathBuilder|Path)\b/.test(src.slice(e))) warnings.push(`Skipped ${name}: ${(err as Error).message}.`); }
     }
     if (pass === 1) for (const s of changes) { const name = /^\s*([A-Za-z_$][\w$]*)/.exec(src.slice(s))![1]; if (isPath(src.env.get(name))) try { Expr.eval(src.expr(child(child(s, 'statementExpression')!, 'expression')!), src.env); } catch { /* reported above */ } }
@@ -417,21 +458,135 @@ export interface PedroImport {
   /** Things the importer skipped or guessed, for the person importing. */ warnings: string[];
 }
 
+export interface PedroJavaFile { name: string; java: string }
+export interface PedroProjectOptions { entryFile?: string; alliance?: 'RED' | 'BLUE' }
+interface ParsedFile { file: PedroJavaFile; src: Source; opName?: string }
+
+function ownerName(src: Source, n: CstNode): string | undefined {
+  const owners = [...nodes(src.root, 'normalClassDeclaration'), ...nodes(src.root, 'enumDeclaration')]
+    .filter(c => at(c) <= at(n) && endOf(n) <= endOf(c)).sort((a, b) => at(b) - at(a));
+  const owner = owners[0], id = owner && child(owner, 'typeIdentifier');
+  return id && tokens(id)[0]?.image;
+}
+
+/** Restore unqualified fields from the helper's enclosing classes rather than another file's last declaration. */
+function lexicalEnv(src: Source, n: CstNode): Map<string, Value> {
+  const local = new Map(src.env);
+  const owners = [...nodes(src.root, 'normalClassDeclaration'), ...nodes(src.root, 'enumDeclaration')]
+    .filter(c => at(c) <= at(n) && endOf(n) <= endOf(c)).sort((a, b) => at(a) - at(b));
+  for (const owner of owners) {
+    const prefix = `${tokens(child(owner, 'typeIdentifier')!)[0].image}.`;
+    for (const [key, value] of src.env) if (key.startsWith(prefix) && !key.slice(prefix.length).includes('.')) local.set(key.slice(prefix.length), value);
+  }
+  return local;
+}
+
+async function parseFiles(files: PedroJavaFile[], env = new Map<string, Value>()): Promise<ParsedFile[]> {
+  if (!files.length) throw new Error('Select an OpMode and its companion .java files.');
+  if (new Set(files.map(f => f.name)).size !== files.length) throw new Error('Duplicate Java filenames: select each companion file once.');
+  const { parse } = await import('java-parser');
+  return files.map(file => {
+    const text = blankComments(file.java);
+    let root: CstNode;
+    try { root = parse(text); } catch (err) {
+      const m = /line: (\d+), column: (\d+)/.exec((err as Error).message);
+      throw new Error(`${file.name}: it doesn't read as Java${m ? ` at line ${m[1]}, column ${m[2]}` : ''}`);
+    }
+    const src = new Source(text, root, env);
+    const auto = nodes(root, 'annotation').find(a => /^@\s*Autonomous\b/.test(src.slice(a)));
+    const cls = nodes(root, 'classDeclaration').find(c => child(c, 'normalClassDeclaration'));
+    const concrete = cls && !(cls.children.classModifier as CstNode[] | undefined)?.some(m => tokens(m).some(t => t.tokenType.name === 'Abstract'));
+    return { file, src, opName: auto && concrete ? /\bname\s*=\s*"([^"]*)"/.exec(src.slice(auto))?.[1] || file.name.replace(/\.java$/i, '') : undefined };
+  });
+}
+
+/** Lists concrete @Autonomous entry files without evaluating their declarations. */
+export async function listPedroOpModes(files: PedroJavaFile[]): Promise<{ fileName: string; name: string }[]> {
+  return (await parseFiles(files)).filter(f => f.opName !== undefined).map(f => ({ fileName: f.file.name, name: f.opName! }));
+}
+
+/** Only numeric/pose helpers made from return expressions and if/else are evaluated. No Java code is executed. */
+function registerPoseHelpers(src: Source, budget: { depth: number }) {
+  for (const m of nodes(src.root, 'methodDeclaration')) {
+    const header = child(m, 'methodHeader')!, result = child(header, 'result');
+    if (!result || !/^(Pose|Pose2D|Point|double|float|int|long)$/.test(src.slice(result).trim())) continue;
+    const declarator = child(header, 'methodDeclarator')!, name = tokens(declarator)[0].image, body = child(m, 'methodBody')!;
+    const params = nodes(declarator, 'variableDeclaratorId').map(n => tokens(n)[0].image);
+    const fn: PureFunction = { kind: 'function', invoke(on, args) {
+      if (args.length !== params.length) throw new Error(`Wrong argument count for ${name}`);
+      if (budget.depth >= 8) throw new Error(`Pose helper recursion limit in ${name}`);
+      const local = lexicalEnv(src, m); local.set('this', on ?? OPAQUE);
+      params.forEach((p, i) => local.set(p, args[i]));
+      const evaluate = (n: CstNode): { value: Value } | undefined => {
+        if (n.name === 'returnStatement') return { value: Expr.eval(src.slice(child(n, 'expression')!), local) };
+        if (n.name === 'ifStatement') {
+          const condition = Expr.eval(src.slice(child(n, 'expression')!), local);
+          if (typeof condition !== 'boolean') throw new Error(`Unresolved condition in ${name}`);
+          const branches = n.children.statement as CstNode[];
+          const branch = branches[condition ? 0 : 1]; return branch && evaluate(branch);
+        }
+        if (!/^(methodBody|block|blockStatements|blockStatement|statement|statementWithoutTrailingSubstatement)$/.test(n.name)) throw new Error(`Unsupported statement in pose helper ${name}`);
+        for (const c of kids(n)) if (!isTok(c)) { const ret = evaluate(c); if (ret) return ret; }
+      };
+      budget.depth++;
+      try { return evaluate(body)?.value; } finally { budget.depth--; }
+    } };
+    src.env.set(`__call_${name}`, fn);
+    const owner = ownerName(src, m);
+    if (owner) src.env.set(`__call_${owner}.${name}`, fn);
+  }
+}
+
+/** Imports one selected routine, resolving companion declarations independently of upload order. */
+export async function importPedroProject(files: PedroJavaFile[], options: PedroProjectOptions = {}): Promise<PedroImport> {
+  const env = new Map<string, Value>(), parsed = await parseFiles(files, env);
+  const candidates = parsed.filter(f => f.opName !== undefined);
+  const entry = options.entryFile ? parsed.find(f => f.file.name === options.entryFile) : candidates.length === 1 ? candidates[0] : parsed.length === 1 ? parsed[0] : undefined;
+  if (!entry) throw new Error(options.entryFile ? `Entry file ${options.entryFile} wasn't selected.` : 'Choose an OpMode to import from the selected Java files.');
+  // Other routines are choices, not dependencies. Their fields and helper names must not shadow this routine.
+  const ordered = [...parsed.filter(f => f !== entry && f.opName === undefined).sort((a, b) => a.file.name.localeCompare(b.file.name)), entry];
+  const budget = { depth: 0 };
+  for (const { src } of ordered) {
+    for (const n of [...nodes(src.root, 'normalClassDeclaration'), ...nodes(src.root, 'enumDeclaration')]) {
+      const name = tokens(child(n, 'typeIdentifier')!)[0].image;
+      env.set(name, { kind: 'namespace', name });
+    }
+    for (const n of nodes(src.root, 'enumConstant')) {
+      const name = (n.children.Identifier?.[0] as IToken | undefined)?.image;
+      if (name) { const value: Namespace = { kind: 'namespace', name: `${ownerName(src, n)}.${name}` }; env.set(name, value); env.set(value.name, value); }
+    }
+    registerPoseHelpers(src, budget);
+  }
+  const alliance = env.get(`Alliance.${options.alliance ?? 'RED'}`);
+  if (alliance) { env.set('alliance', alliance); env.set('Robot.alliance', alliance); }
+  // Every pass can resolve one more companion dependency. The final pass alone reports skipped geometry.
+  for (let pass = 0; pass < parsed.length + 2; pass++) for (const { src } of ordered) declarations(src, [], true);
+  const warnings: string[] = [];
+  for (const { src } of ordered) declarations(src, warnings, true);
+  const unresolved = entry.src.calls(entry.src.root).filter(c => c.method === 'follow' || c.method === 'followPath')
+    .filter(c => !c.args.some(a => isPath(entry.src.value(a)))).map(c => c.args.map(a => entry.src.slice(a)).join(', '));
+  if (unresolved.length) throw new Error(`Cannot resolve followed path ${unresolved.join(', ')}. Include its companion path and field .java files. ${[...new Set(warnings)].join(' ')}`);
+  if (alliance) warnings.unshift(`Alliance-dependent poses previewed for ${options.alliance ?? 'RED'}; runtime gamepad choices and start delay are not executed.`);
+  return buildPedro(entry.src, entry.file.name, [...new Set(warnings)]);
+}
+
 /**
  * Converts a Pedro Pathing OpMode to an AUTO tree. Throws when the file isn't Java, or has no path that it can read. The
  * Java parser loads on the first import.
  * @param fileName The source file's name. The class name in the source names the tree; the file name is the fallback.
  */
 export async function importPedro(java: string, fileName = 'Auto.java'): Promise<PedroImport> {
-  const { parse } = await import('java-parser'), text = blankComments(java);
-  let root: CstNode;
-  try { root = parse(text); } catch (err) { const m = /line: (\d+), column: (\d+)/.exec((err as Error).message); throw new Error(m ? `it doesn't read as Java at line ${m[1]}, column ${m[2]}` : 'it doesn\'t read as Java'); }
-  const src = new Source(text, root), env = src.env, warnings: string[] = [];
+  const [{ src }] = await parseFiles([{ name: fileName, java }]), warnings: string[] = [];
   declarations(src, warnings);
+  return buildPedro(src, fileName, warnings);
+}
+
+function buildPedro(src: Source, fileName: string, warnings: string[]): PedroImport {
+  const { root, env } = src;
 
   const events = src.scan(root), order: string[] = [];
   for (const e of events) if (e.kind === 'path' && !order.includes(e.name)) order.push(e.name);
-  const paths = (order.length ? order : [...env.keys()]).filter(k => isPath(env.get(k)));
+  const paths = (order.length ? order : [...env.keys()].filter(k => !k.includes('.'))).filter(k => isPath(env.get(k)));
   if (!paths.length) throw new Error('found no Pedro path: expected line(...), curve(...), new BezierLine(...), or pathBuilder()...build()');
   if (!order.length) warnings.push('The source never calls follow() or followPath(), so the paths run in the order they are declared.');
 
