@@ -102,10 +102,10 @@ public class Mech extends OpMode {
     public void init() { follower.setStartingPose(a); buildPaths(); }
 }`;
     const { tree, warnings } = await importPedro(src, 'Mech.java'), c = children(tree) as unknown as Record<string, unknown>[];
-    expect(c.map(s => s.id)).toEqual(['s1', 's2', 's2-shoot', 's4', 's5', 's6', 's6-shoot']);
-    expect(c.map(s => s.ref ?? 'parallel')).toEqual(['drive.driveTo', 'drive.followPath', 'shooter.shoot', 'parallel', 'parallel', 'drive.followPath', 'shooter.shoot']);
+    expect(c.map(s => s.id)).toEqual(['s1', 's2', 's2-shoot', 's4', 's5', 's6', 's7', 's7-shoot']);
+    expect(c.map(s => s.ref ?? 'parallel')).toEqual(['drive.driveTo', 'drive.followPath', 'shooter.shoot', 'wait', 'parallel', 'parallel', 'drive.followPath', 'shooter.shoot']);
     // The sleep was held with the intake running, so the wait runs beside the intake too.
-    expect((c[4] as { parallel: { children: { ref: string; params: { timeoutSec: number } }[] } }).parallel.children[0]).toMatchObject({ ref: 'wait', params: { timeoutSec: 0.5 } });
+    expect((c[5] as { parallel: { children: { ref: string; params: { timeoutSec: number } }[] } }).parallel.children[0]).toMatchObject({ ref: 'wait', params: { timeoutSec: 0.5 } });
     expect(warnings.join(' ')).toMatch(/2 intake calls and 2 launches/);
     expect(() => { addAutoTree(tree); removeAutoTree(String(tree.id)); }).not.toThrow();
   });
@@ -165,4 +165,14 @@ public class Tricky extends LinearOpMode {
   it('rejects a file with no path', async () => {
     await expect(importPedro('public class Empty { }')).rejects.toThrow(/no Pedro path/);
   });
+  it('keeps individual shots and explicit recovery waits instead of emptying all four preloads', async () => {
+    const src = V2.replace('follower.follow(park); step++;', 'follower.follow(park); shooter.shootOne(); sleep(900); shooter.shootOne(); sleep(900); shooter.shootOne(); step++;');
+    const { tree } = await importPedro(src);
+    const c = children(tree);
+    expect(c.map(s => s.ref)).toEqual(['drive.driveTo', 'drive.followPath', 'shooter.shoot', 'wait', 'shooter.shoot', 'wait', 'shooter.shoot']);
+    expect(c.filter(s => s.ref === 'shooter.shoot').map(s => s.params.count)).toEqual([1, 1, 1]);
+    expect(c.filter(s => s.ref === 'wait').map(s => s.params.timeoutSec)).toEqual([0.9, 0.9]);
+    expect((tree.meta as Record<string, unknown>).startAtFirstPose).toBe(true);
+  });
+
 });

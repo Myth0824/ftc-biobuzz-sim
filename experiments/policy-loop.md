@@ -194,3 +194,24 @@ for a fifth. On four seeds it scored three AUTO TIPS, where the committed pair s
   circle on its own side, so it can't stand there, although a robot that is square to the wall fits.
 - Stalls are still 4 per robot per MATCH, mostly contention at the launch spots.
 - The 13 s per robot of settling is physical braking. A robot that launches while it moves would remove it.
+
+
+## e98/e99: team 32294 hardware and source AUTO realism (2026-11-10)
+
+Kept for hardware/rule fidelity, not a claimed score optimization. R0 is now a fixed rear FIFO shooter at 0.9 s per
+loaded ball, front-only intake, no invented turret, and the team's18 in. Java chassis assumption. Other presets remain
+available to non-team robots. Imported and built-in team plans are placed at their first pose before AUTO.
+The Java route aligns starts with the CAD physical-wall inset, backs to the rear-shooting stand, sends three
+individual preloads with explicit recovery and hive-settle waits, retains the fourth, and parks.
+
+Repeatable isolated evaluation: `npx tsx scripts/team-auto.ts --output experiments/team-auto-2026-11-10.json`.
+Both source routes were run for red and blue, seeds 1, 3, 7:12/12 parked, launch 6/6tipped once, three individual shots
+at 0.479, 1.392, 2.304 s (0.913 and 0.912 s gaps),28 AUTO points for Launch Park and8 for Park. Own-half containment is
+checked in the four-robot regression and Java full-footprint sampling. Robot pose and motor calibration remain
+untested on hardware. The final-tick passive intake and source-program-end intake bugs were also corrected.
+
+Required planner check: baseline from an isolated origin/main source snapshot, then
+`npx tsx scripts/eval.ts e98-before-team-realism 4 2` and `npx tsx scripts/eval.ts e99-team-realism 4 2`, compared with
+`python3 scripts/eval-compare.py e98-before-team-realism e99-team-realism`. Combined mean 801.3 -> 778.0,
+paired delta -23.2 points, SE 20.9, n=4; AUTO 152 -> 157; stalls 3.4 -> 3.1 per robot. This small full-match sample includes
+R0's corrected physical capabilities and cannot be read as a general planner comparison or a measured improvement.

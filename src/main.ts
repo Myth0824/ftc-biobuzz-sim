@@ -13,7 +13,7 @@ import { BOT_IDS, loadBots, saveBots } from './setup';
 import { DT, NO_INPUT, type Inputs } from './sim/world';
 import { loadBracket, record, saveBracket } from './tournament';
 import { loadUserTrees } from './user-trees';
-import { app, countMatch, focus, goLive, openReview, reset, running, saveTrace, startMatch } from './ui/app';
+import { app, countMatch, focus, goLive, openReview, placeSelectedAutoStarts, reset, running, saveTrace, startMatch } from './ui/app';
 import { $, closeModals, initModals, toast } from './ui/dom';
 import { initEditorUi, paintEditor, paintGhost } from './ui/editor-ui';
 import { hud, initHud, paintBracket } from './ui/hud';
@@ -36,7 +36,7 @@ app.bracket = loadBracket();
 // The field editor edits one robot's AUTO poses before the MATCH. An edit switches the robot to the edited copy.
 app.editor = new FieldEditor({ view: app.view, canvas: app.canvas, bots: app.bots, sim: () => app.sim,
   setAuto: (k, id) => { app.bots[k].auto = id; saveBots(app.bots); if (app.coaches[k]) app.coaches[k].autoOverride = id === 'default' ? null : id; paintBots(); },
-  changed: () => { sel.camera.value = app.view.mode; paintEditor(); paintTree(); } });
+  changed: () => { placeSelectedAutoStarts(); sel.camera.value = app.view.mode; paintEditor(); paintTree(); } });
 
 initModals(); initSettings(); initRobotConfig(); initTransport(); initTreeView(); initEditorUi(); initHud();
 reset();

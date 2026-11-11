@@ -352,7 +352,12 @@ export class Sim {
       if (this.hives[a].pollTip()) { this.say(`${a.toUpperCase()} HIVE TIP (${this.hives[a].tips})`); this.owed[a].push({ at: this.simTime + 2 }); }
     }
     this.humanPlayers();
-    for (const r of per) { r.v.aimTurret(); r.v.intake(r.active && r.inp.intakeHeld !== undefined && !r.inp.intakeHeld ? 'none' : (r.inp.intake ?? 'all')); if (r.active) { r.v.shoot(r.inp); r.v.place(r.inp); } }
+    // No powered mechanisms before start, during transition, or after the clock expires (G304/G403/G404).
+    for (const r of per) if (r.active) {
+      r.v.aimTurret();
+      r.v.intake(r.inp.intakeHeld === false ? 'none' : (r.inp.intake ?? 'all'));
+      r.v.shoot(r.inp); r.v.place(r.inp);
+    }
     this.housekeeping(); this.touch();
   }
 

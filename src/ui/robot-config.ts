@@ -5,7 +5,7 @@
  */
 import { AUTO_PROBLEMS, AUTO_TREES, addAutoTree, autoStart } from '../auto/onboard';
 import { importPedroProject, listPedroOpModes, type PedroJavaFile } from '../auto/pedro';
-import { BOT_IDS, MAIN_ROBOT_INDEX, REF_ERR, assignDriver, defaultBot, describe, describeLines, metaBot, sanitize, saveBots, startSide, type BotSetup, type DriverKind } from '../setup';
+import { BOT_IDS, MAIN_ROBOT_INDEX, REF_ERR, assignDriver, defaultBot, teamBot, describe, describeLines, metaBot, sanitize, saveBots, startSide, type BotSetup, type DriverKind } from '../setup';
 import { TIERS } from '../tournament';
 import { massFromInput, massToInput, sizeFromInput, sizeToInput, speedFromInput, speedToInput } from '../units';
 import { saveUserTree } from '../user-trees';
@@ -54,6 +54,8 @@ export function openConfig(i: number) {
   const b = app.bots[i], isMain = i === MAIN_ROBOT_INDEX, us = app.units === 'us';
   $('bchead').textContent = `Robot config: ${b.plate} (${BOT_IDS[i]}), ${i < 2 ? 'red' : 'blue'} alliance, ${startSide(i)} start`; bc.auto.innerHTML = autoOptions(i);
   bc.plate.value = b.plate; bc.plate.disabled = isMain;
+  bc.shooter.disabled = isMain;
+  bc.shooter.title = isMain ? 'Team32294: one-ball rear shooter,0.9s between loaded shots.' : '';
   bc.driver.value = b.driver; bc.drive.value = b.stickFrame; bc.shooter.value = b.shooter; bc.auto.value = b.auto; bc.plan.value = String(b.flowerStartSec);
   bc.rpm.value = String(b.driveRpm); bc.size.value = String(sizeToInput(b.sizeIn, app.units)); bc.mass.value = String(massToInput(b.massLb, app.units));
   $('bcsizelabel').textContent = `Chassis, square, ${us ? 'in.' : 'cm'}`; $('bcmasslabel').textContent = `Mass, ${us ? 'lb' : 'kg'}`; $('bcspeedlabel').textContent = `Launch speed, ${us ? 'ft/s' : 'm/s'}`;
@@ -134,7 +136,7 @@ export function initRobotConfig() {
   });
   $('bcedit').onclick = () => { if (app.editing >= 0 && app.editing < 2) openEditor(app.editing); };
   $('bcdone').onclick = closeConfig;
-  $('bcdefault').onclick = () => applyPreset(metaBot); $('bcbaseline').onclick = () => applyPreset(defaultBot);
+  $('bcdefault').onclick = () => applyPreset(i => i === MAIN_ROBOT_INDEX ? teamBot(i) : metaBot(i)); $('bcbaseline').onclick = () => applyPreset(defaultBot);
   $('bcpedro').onclick = () => $('bcpedrofile').click();
   ownKeys($('bcpedroentry'));
   $('bcpedroconfirm').onclick = () => { if (pendingPedro && pendingPedro.robot === app.editing) void importPedroFiles(pendingPedro.files, pendingPedro.robot, $<HTMLSelectElement>('bcpedroentry').value); };
