@@ -37,6 +37,7 @@ export interface BotSetup {
 export const BOT_IDS = ['R0', 'R1', 'B0', 'B1'] as const;
 // The storage key changed when the simulator's default became the meta build, so that a browser with the old default gets the new one.
 const IN = 0.0254, LB = 0.45359237, KEY = 'biobuzz.bots.v2';
+const TEAM_DEFAULTS_KEY = 'biobuzz.bots.team32294.v1';
 /**
  * The default robot is small, light, and fast: 15 in., 22 lb, and 600 rpm. Over 24 seeds with the planner on all four
  * robots, it scores 31.9 combined points more than the reference robot in `DEFAULT_ROBOT` (16.9 in., 28.7 lb, 435 rpm),
@@ -48,12 +49,16 @@ export const REF_ERR = { errElevDeg: DEFAULT_ROBOT.shooter.pollen.elevationDeg.s
 export const defaultBot = (i: number): BotSetup => ({ plate: i === MAIN_ROBOT_INDEX ? MAIN_ROBOT_PLATE : BOT_IDS[i], driver: i === MAIN_ROBOT_INDEX ? 'pad1' : 'planner', stickFrame: 'field', shooter: 'dual', auto: 'default', flowerStartSec: 0, dualIntake: false, dualShooter: false, defense: 'none', ...REF_ERR, intakeP: DEFAULT_ROBOT.intake.successP, ...DEFAULT_SETUP });
 
 /**
- * The robot that the simulator opens with: the combined build that the experiments point to. It is a four-element
+ * The opponent default and experimental preset: the combined build that the experiments point to. It is a four-element
  * catapult, 12 in., 15.4 lb, and 500 rpm, with intakes at both ends. Red with this build beat the baseline robot by 96
  * points over 24 seeds (e24 in experiments/policy-loop.md). `defaultBot` stays the baseline of every experiment, so the
  * tables in the Match Lab and in the post keep their reference.
  */
 export const metaBot = (i: number): BotSetup => ({ ...defaultBot(i), shooter: 'catapult', driveRpm: 500, sizeIn: 12, massLb: 15.4, dualIntake: true });
+
+/** Team 32294: 18 in. Java chassis assumption, front intake, fixed rear FIFO shooter at 0.9 s/ball.
+ * Drive and mass use the existing reference assumptions until the team's measured values are available. */
+export const teamBot = (i: number = MAIN_ROBOT_INDEX): BotSetup => ({ ...defaultBot(i), shooter: 'fifo', auto: '32294-custom', sizeIn: 18, driveRpm: DEFAULT_ROBOT.motor.freeRpm, massLb: Math.round(DEFAULT_ROBOT.mass / LB * 10) / 10, turret: false });
 
 /** The team numbers that the simulator deals to the four robots: the three NCSSM teams, and 772, a friend team that one of our mentors also works with. */
 export const TEAM_NUMBERS = ['5064', '8569', '22377', '772'];
@@ -61,10 +66,24 @@ export const TEAM_NUMBERS = ['5064', '8569', '22377', '772'];
 /** Loads the four robot setups from the browser's storage. Missing or unreadable entries fall back to the defaults. */
 export function loadBots(): BotSetup[] {
   let saved: Partial<BotSetup>[] = []; try { saved = JSON.parse(localStorage.getItem(KEY) ?? '[]'); } catch { saved = []; }
+  if (!Array.isArray(saved)) saved = [];
+  let migrate = true; try { migrate = localStorage.getItem(TEAM_DEFAULTS_KEY) !== '1'; } catch { /* No storage. */ }
   // A browser with no stored setups gets the team numbers as number plates, in a random order on every visit. The
   // shuffle only names the robots: R0, R1, B0, and B1 stay the robot ids in traces, and match seeds don't depend on it.
   const plates = [...TEAM_NUMBERS]; for (let i = plates.length - 1; i > 0; i--) { const k = Math.floor(Math.random() * (i + 1)); [plates[i], plates[k]] = [plates[k], plates[i]]; }
-  return BOT_IDS.map((_, i) => sanitize({ ...metaBot(i), plate: plates[i], ...(saved[i] ?? {}) }, i));
+  const bots = BOT_IDS.map((_, i) => {
+    let stored = saved[i] ?? {};
+    if (i === MAIN_ROBOT_INDEX && migrate) {
+      const old = metaBot(i), team = teamBot(i);
+      // Replace only the complete old default drive preset, retaining independently edited dimensions and tuning.
+      const oldDrive = stored.shooter === old.shooter && stored.driveRpm === old.driveRpm && stored.sizeIn === old.sizeIn && stored.massLb === old.massLb;
+      stored = { ...stored, ...(oldDrive ? { driveRpm: team.driveRpm, sizeIn: team.sizeIn, massLb: team.massLb } : {}), ...(stored.auto === 'default' ? { auto: team.auto } : {}) };
+    }
+    return sanitize({ ...(i === MAIN_ROBOT_INDEX ? teamBot(i) : metaBot(i)), plate: plates[i], ...stored }, i);
+  });
+  // Persist the migration before marking it applied; future explicit AUTO choices are retained.
+  try { localStorage.setItem(KEY, JSON.stringify(bots)); localStorage.setItem(TEAM_DEFAULTS_KEY, '1'); } catch { /* Storage is optional. */ }
+  return bots;
 }
 export function saveBots(bots: BotSetup[]) { try { localStorage.setItem(KEY, JSON.stringify(bots)); } catch { /* Storage is a convenience. The setups still apply to this page. */ } }
 
@@ -86,8 +105,8 @@ export function sanitize(b: BotSetup, i: number): BotSetup {
   if (old) b = { ...b, errElevDeg: REF_ERR.errElevDeg * old, errAzimDeg: REF_ERR.errAzimDeg * old, errSpeed: REF_ERR.errSpeed * old };
   const num = (v: number, lo: number, hi: number, d: number) => (Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : d);
   return { ...b, auto: RENAMED[b.auto] ?? b.auto, plate: i === MAIN_ROBOT_INDEX ? MAIN_ROBOT_PLATE : (b.plate || BOT_IDS[i]).trim().slice(0, 6) || BOT_IDS[i], driver: i === MAIN_ROBOT_INDEX ? (b.driver === 'planner' ? 'pad1' : b.driver) : 'planner',
-    // Main robot is always: front intake only, full 360 turret
-    ...(i === MAIN_ROBOT_INDEX ? { dualIntake: false, turret: true, turretRangeDeg: 360, turretSlewDegPerSec: null } : {}), driveRpm: Math.round(num(b.driveRpm, 100, 1200, DEFAULT_SETUP.driveRpm)), sizeIn: Math.round(num(b.sizeIn, 10, 18, DEFAULT_SETUP.sizeIn) * 10) / 10, massLb: Math.round(num(b.massLb, 10, 42, DEFAULT_SETUP.massLb) * 10) / 10,
+    // Team 32294 has a front intake and a fixed rear single-ball launcher.
+    ...(i === MAIN_ROBOT_INDEX ? { dualIntake: false, dualShooter: false, turret: false, shooter: 'fifo' as const } : {}), driveRpm: Math.round(num(b.driveRpm, 100, 1200, DEFAULT_SETUP.driveRpm)), sizeIn: Math.round(num(b.sizeIn, 10, 18, DEFAULT_SETUP.sizeIn) * 10) / 10, massLb: Math.round(num(b.massLb, 10, 42, DEFAULT_SETUP.massLb) * 10) / 10,
     errElevDeg: Math.round(num(b.errElevDeg, 0, 15, REF_ERR.errElevDeg) * 100) / 100, errAzimDeg: Math.round(num(b.errAzimDeg, 0, 15, REF_ERR.errAzimDeg) * 100) / 100, errSpeed: Math.round(num(b.errSpeed, 0, 1.5, REF_ERR.errSpeed) * 1000) / 1000,
     intakeP: Math.round(num(b.intakeP, 0.2, 1, DEFAULT_ROBOT.intake.successP) * 100) / 100,
     turretRangeDeg: Math.round(num(b.turretRangeDeg ?? 360, 30, 360, 360)), turretSlewDegPerSec: b.turretSlewDegPerSec && b.turretSlewDegPerSec > 0 ? Math.round(num(b.turretSlewDegPerSec, 10, 3600, 360)) : null };
@@ -104,6 +123,7 @@ export function robotConfig(b: BotSetup): RobotConfig {
   const c = structuredClone(DEFAULT_ROBOT); c.shooter.type = b.shooter; setDriveRpm(c, b.driveRpm); setSquareSize(c, b.sizeIn * IN); setMass(c, b.massLb * LB); c.intake.dualSided = !!b.dualIntake; c.shooter.dualSided = !!b.dualShooter; c.shooter.turret = !!b.turret; c.shooter.turretRangeDeg = b.turretRangeDeg ?? 360; c.shooter.turretSlewDegPerSec = b.turretSlewDegPerSec ?? Infinity;
   for (const lp of [c.shooter.pollen, c.shooter.nectar]) { lp.elevationDeg.std *= b.errElevDeg / REF_ERR.errElevDeg; lp.yawStdDeg *= b.errAzimDeg / REF_ERR.errAzimDeg; lp.speed.std *= b.errSpeed / REF_ERR.errSpeed; }
   c.intake.successP = b.intakeP;
+  if (b.plate === MAIN_ROBOT_PLATE) c.shooter.cycleSec = 0.9;
   return c;
 }
 

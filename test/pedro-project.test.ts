@@ -29,21 +29,23 @@ describe('multi-file Pedro import', () => {
   it('imports only the selected Park routine, resolving companion constants and pose helpers', async () => {
     const { tree, warnings } = await importPedroProject(files, { entryFile: 'ParkAuto.java' });
     expect(tree.name).toBe('Pedro: Park Auto');
-    expect(tree.defs).toEqual({ start: 'pose(-1.6, 0.318, 0)' });
+    expect(tree.defs).toEqual({ start: 'pose(-1.564, 0.302, 0)' });
     expect(steps(tree).map(s => s.ref)).toEqual(['drive.driveTo', 'drive.followPath']);
-    expect(steps(tree)[1].params).toMatchObject({ tag: 'pedro-wallToPark', waypoints: [{ x: -1.499, y: 0.914, headingDeg: 0 }] });
+    expect(steps(tree)[1].params).toMatchObject({ tag: 'pedro-wallToPark', waypoints: [{ x: -1.463, y: 0.895, headingDeg: 0 }] });
     expect(warnings.join(' ')).not.toMatch(/Skipped|never calls/);
     expect(() => { addAutoTree(tree); removeAutoTree(String(tree.id)); }).not.toThrow();
   });
 
-  it('imports Launch Park in follow order, without inventing a launcher action or timeout wait', async () => {
+  it('imports Launch Park with three single rear shots and the actual recovery waits', async () => {
     const { tree } = await importPedroProject([...files].reverse(), { entryFile: 'LaunchParkAuto.java' });
-    expect(tree.defs).toEqual({ start: 'pose(-0.305, -1.6, 90)' });
+    expect(tree.defs).toEqual({ start: 'pose(-0.324, -1.564, -90)' });
     const c = steps(tree);
-    expect(c.map(s => s.ref)).toEqual(['drive.driveTo', 'drive.followPath', 'drive.followPath']);
-    expect(c.slice(1).map(s => s.params.tag)).toEqual(['pedro-startToLaunch', 'pedro-launchToPark']);
-    expect(c[2].params.waypoints).toHaveLength(6);
-    expect(c[2].params.waypoints?.at(-1)).toEqual({ x: -1.499, y: 0.914, headingDeg: 90 });
+    expect(c.map(s => s.ref)).toEqual(['drive.driveTo', 'drive.followPath', 'shooter.shoot', 'wait', 'shooter.shoot', 'wait', 'shooter.shoot', 'wait', 'drive.followPath']);
+    expect(c.filter(s => s.ref === 'shooter.shoot').map(s => (s.params as { count?: number }).count)).toEqual([1, 1, 1]);
+    expect(c.filter(s => s.ref === 'wait').map(s => s.params.timeoutSec)).toEqual([0.9, 0.9, 1.9]);
+    expect(c.filter(s => s.ref === 'drive.followPath').map(s => s.params.tag)).toEqual(['pedro-startToLaunch', 'pedro-launchToPark']);
+    expect(c.at(-1)!.params.waypoints).toHaveLength(6);
+    expect(c.at(-1)!.params.waypoints?.at(-1)).toEqual({ x: -1.463, y: 0.895, headingDeg: -90 });
     expect(() => { addAutoTree(tree); removeAutoTree(String(tree.id)); }).not.toThrow();
   });
 
@@ -116,8 +118,8 @@ describe('multi-file Pedro import', () => {
       const sim = new Sim(RAPIER, undefined, 'full', 3, { opponent: true, partners: true });
       const preview = previewAuto(AUTO_TREES[String(tree.id)], sim, sim.robot.translation());
       expect(preview.poses).toHaveLength(entryFile === 'ParkAuto.java' ? 2 : 8);
-      expect(preview.poses.every(p => !p.shoots)).toBe(true);
-      expect(preview.path.at(-1)).toEqual({ x: -1.499, z: -0.914 });
+      expect(preview.poses.filter(p => p.shoots)).toHaveLength(entryFile === 'ParkAuto.java' ? 0 : 1);
+      expect(preview.path.at(-1)).toEqual({ x: -1.463, z: -0.895 });
     } finally { removeAutoTree(String(tree.id)); }
   });
 

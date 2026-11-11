@@ -1,0 +1,524 @@
+[
+  {
+    "entryFile": "ParkAuto.java",
+    "alliance": "red",
+    "seed": 1,
+    "start": {
+      "x": -1.5640000104904175,
+      "y": 0.3019999861717224,
+      "headingDeg": 0
+    },
+    "end": {
+      "x": -1.456348180770874,
+      "y": 0.9434618949890137,
+      "headingDeg": 0.004847233461532596
+    },
+    "shots": [],
+    "retained": 4,
+    "parked": true,
+    "maxOwnX": -1.456348180770874,
+    "score": {
+      "leave": 3,
+      "autoPark": 5,
+      "autoTips": 0,
+      "teleopTips": 0,
+      "cell": 6,
+      "flower": 0,
+      "bottomNectar": 0,
+      "garden": 4,
+      "park": 0,
+      "fouls": 0,
+      "total": 18,
+      "rp": {
+        "swarm": false,
+        "pollinator1": false,
+        "pollinator2": false
+      }
+    }
+  },
+  {
+    "entryFile": "ParkAuto.java",
+    "alliance": "red",
+    "seed": 3,
+    "start": {
+      "x": -1.5640000104904175,
+      "y": 0.3019999861717224,
+      "headingDeg": 0
+    },
+    "end": {
+      "x": -1.456348180770874,
+      "y": 0.9434618949890137,
+      "headingDeg": 0.004847233461532596
+    },
+    "shots": [],
+    "retained": 4,
+    "parked": true,
+    "maxOwnX": -1.456348180770874,
+    "score": {
+      "leave": 3,
+      "autoPark": 5,
+      "autoTips": 0,
+      "teleopTips": 0,
+      "cell": 6,
+      "flower": 0,
+      "bottomNectar": 0,
+      "garden": 4,
+      "park": 0,
+      "fouls": 0,
+      "total": 18,
+      "rp": {
+        "swarm": false,
+        "pollinator1": false,
+        "pollinator2": false
+      }
+    }
+  },
+  {
+    "entryFile": "ParkAuto.java",
+    "alliance": "red",
+    "seed": 7,
+    "start": {
+      "x": -1.5640000104904175,
+      "y": 0.3019999861717224,
+      "headingDeg": 0
+    },
+    "end": {
+      "x": -1.456348180770874,
+      "y": 0.9434618949890137,
+      "headingDeg": 0.004847233461532596
+    },
+    "shots": [],
+    "retained": 4,
+    "parked": true,
+    "maxOwnX": -1.456348180770874,
+    "score": {
+      "leave": 3,
+      "autoPark": 5,
+      "autoTips": 0,
+      "teleopTips": 0,
+      "cell": 6,
+      "flower": 0,
+      "bottomNectar": 0,
+      "garden": 4,
+      "park": 0,
+      "fouls": 0,
+      "total": 18,
+      "rp": {
+        "swarm": false,
+        "pollinator1": false,
+        "pollinator2": false
+      }
+    }
+  },
+  {
+    "entryFile": "ParkAuto.java",
+    "alliance": "blue",
+    "seed": 1,
+    "start": {
+      "x": -1.5640000104904175,
+      "y": 0.3019999861717224,
+      "headingDeg": 0
+    },
+    "end": {
+      "x": -1.4563474655151367,
+      "y": 0.9434691071510315,
+      "headingDeg": 0.004794035606323632
+    },
+    "shots": [],
+    "retained": 4,
+    "parked": true,
+    "maxOwnX": -1.4563474655151367,
+    "score": {
+      "leave": 3,
+      "autoPark": 5,
+      "autoTips": 0,
+      "teleopTips": 0,
+      "cell": 6,
+      "flower": 0,
+      "bottomNectar": 0,
+      "garden": 4,
+      "park": 0,
+      "fouls": 0,
+      "total": 18,
+      "rp": {
+        "swarm": false,
+        "pollinator1": false,
+        "pollinator2": false
+      }
+    }
+  },
+  {
+    "entryFile": "ParkAuto.java",
+    "alliance": "blue",
+    "seed": 3,
+    "start": {
+      "x": -1.5640000104904175,
+      "y": 0.3019999861717224,
+      "headingDeg": 0
+    },
+    "end": {
+      "x": -1.4563474655151367,
+      "y": 0.9434691071510315,
+      "headingDeg": 0.004794035606323632
+    },
+    "shots": [],
+    "retained": 4,
+    "parked": true,
+    "maxOwnX": -1.4563474655151367,
+    "score": {
+      "leave": 3,
+      "autoPark": 5,
+      "autoTips": 0,
+      "teleopTips": 0,
+      "cell": 6,
+      "flower": 0,
+      "bottomNectar": 0,
+      "garden": 4,
+      "park": 0,
+      "fouls": 0,
+      "total": 18,
+      "rp": {
+        "swarm": false,
+        "pollinator1": false,
+        "pollinator2": false
+      }
+    }
+  },
+  {
+    "entryFile": "ParkAuto.java",
+    "alliance": "blue",
+    "seed": 7,
+    "start": {
+      "x": -1.5640000104904175,
+      "y": 0.3019999861717224,
+      "headingDeg": 0
+    },
+    "end": {
+      "x": -1.4563474655151367,
+      "y": 0.9434691071510315,
+      "headingDeg": 0.004794035606323632
+    },
+    "shots": [],
+    "retained": 4,
+    "parked": true,
+    "maxOwnX": -1.4563474655151367,
+    "score": {
+      "leave": 3,
+      "autoPark": 5,
+      "autoTips": 0,
+      "teleopTips": 0,
+      "cell": 6,
+      "flower": 0,
+      "bottomNectar": 0,
+      "garden": 4,
+      "park": 0,
+      "fouls": 0,
+      "total": 18,
+      "rp": {
+        "swarm": false,
+        "pollinator1": false,
+        "pollinator2": false
+      }
+    }
+  },
+  {
+    "entryFile": "LaunchParkAuto.java",
+    "alliance": "red",
+    "seed": 1,
+    "start": {
+      "x": -0.3240000009536743,
+      "y": -1.5640000104904175,
+      "headingDeg": -90
+    },
+    "end": {
+      "x": -1.4648983478546143,
+      "y": 0.930466890335083,
+      "headingDeg": -89.99161085737978
+    },
+    "shots": [
+      {
+        "at": 0.479,
+        "count": 1
+      },
+      {
+        "at": 1.392,
+        "count": 1
+      },
+      {
+        "at": 2.304,
+        "count": 1
+      }
+    ],
+    "retained": 1,
+    "parked": true,
+    "maxOwnX": -0.3240000009536743,
+    "score": {
+      "leave": 3,
+      "autoPark": 5,
+      "autoTips": 20,
+      "teleopTips": 0,
+      "cell": 0,
+      "flower": 0,
+      "bottomNectar": 0,
+      "garden": 4,
+      "park": 0,
+      "fouls": 0,
+      "total": 32,
+      "rp": {
+        "swarm": false,
+        "pollinator1": false,
+        "pollinator2": false
+      }
+    }
+  },
+  {
+    "entryFile": "LaunchParkAuto.java",
+    "alliance": "red",
+    "seed": 3,
+    "start": {
+      "x": -0.3240000009536743,
+      "y": -1.5640000104904175,
+      "headingDeg": -90
+    },
+    "end": {
+      "x": -1.4648869037628174,
+      "y": 0.9310795664787292,
+      "headingDeg": -89.98855367464517
+    },
+    "shots": [
+      {
+        "at": 0.479,
+        "count": 1
+      },
+      {
+        "at": 1.392,
+        "count": 1
+      },
+      {
+        "at": 2.304,
+        "count": 1
+      }
+    ],
+    "retained": 1,
+    "parked": true,
+    "maxOwnX": -0.3240000009536743,
+    "score": {
+      "leave": 3,
+      "autoPark": 5,
+      "autoTips": 20,
+      "teleopTips": 0,
+      "cell": 0,
+      "flower": 0,
+      "bottomNectar": 0,
+      "garden": 4,
+      "park": 0,
+      "fouls": 0,
+      "total": 32,
+      "rp": {
+        "swarm": false,
+        "pollinator1": false,
+        "pollinator2": false
+      }
+    }
+  },
+  {
+    "entryFile": "LaunchParkAuto.java",
+    "alliance": "red",
+    "seed": 7,
+    "start": {
+      "x": -0.3240000009536743,
+      "y": -1.5640000104904175,
+      "headingDeg": -90
+    },
+    "end": {
+      "x": -1.463694453239441,
+      "y": 0.9306471943855286,
+      "headingDeg": -89.94894069441108
+    },
+    "shots": [
+      {
+        "at": 0.479,
+        "count": 1
+      },
+      {
+        "at": 1.392,
+        "count": 1
+      },
+      {
+        "at": 2.304,
+        "count": 1
+      }
+    ],
+    "retained": 1,
+    "parked": true,
+    "maxOwnX": -0.3240000009536743,
+    "score": {
+      "leave": 3,
+      "autoPark": 5,
+      "autoTips": 20,
+      "teleopTips": 0,
+      "cell": 0,
+      "flower": 0,
+      "bottomNectar": 0,
+      "garden": 4,
+      "park": 0,
+      "fouls": 0,
+      "total": 32,
+      "rp": {
+        "swarm": false,
+        "pollinator1": false,
+        "pollinator2": false
+      }
+    }
+  },
+  {
+    "entryFile": "LaunchParkAuto.java",
+    "alliance": "blue",
+    "seed": 1,
+    "start": {
+      "x": -0.3240000009536743,
+      "y": -1.5640000104904175,
+      "headingDeg": -90
+    },
+    "end": {
+      "x": -1.4648981094360352,
+      "y": 0.9304125905036926,
+      "headingDeg": -89.98635617280803
+    },
+    "shots": [
+      {
+        "at": 0.479,
+        "count": 1
+      },
+      {
+        "at": 1.392,
+        "count": 1
+      },
+      {
+        "at": 2.304,
+        "count": 1
+      }
+    ],
+    "retained": 1,
+    "parked": true,
+    "maxOwnX": -0.3240000009536743,
+    "score": {
+      "leave": 3,
+      "autoPark": 5,
+      "autoTips": 20,
+      "teleopTips": 0,
+      "cell": 0,
+      "flower": 0,
+      "bottomNectar": 0,
+      "garden": 4,
+      "park": 0,
+      "fouls": 0,
+      "total": 32,
+      "rp": {
+        "swarm": false,
+        "pollinator1": false,
+        "pollinator2": false
+      }
+    }
+  },
+  {
+    "entryFile": "LaunchParkAuto.java",
+    "alliance": "blue",
+    "seed": 3,
+    "start": {
+      "x": -0.3240000009536743,
+      "y": -1.5640000104904175,
+      "headingDeg": -90
+    },
+    "end": {
+      "x": -1.4649221897125244,
+      "y": 0.9298422336578369,
+      "headingDeg": -89.98831219098957
+    },
+    "shots": [
+      {
+        "at": 0.479,
+        "count": 1
+      },
+      {
+        "at": 1.392,
+        "count": 1
+      },
+      {
+        "at": 2.304,
+        "count": 1
+      }
+    ],
+    "retained": 1,
+    "parked": true,
+    "maxOwnX": -0.3240000009536743,
+    "score": {
+      "leave": 3,
+      "autoPark": 5,
+      "autoTips": 20,
+      "teleopTips": 0,
+      "cell": 0,
+      "flower": 0,
+      "bottomNectar": 0,
+      "garden": 4,
+      "park": 0,
+      "fouls": 0,
+      "total": 32,
+      "rp": {
+        "swarm": false,
+        "pollinator1": false,
+        "pollinator2": false
+      }
+    }
+  },
+  {
+    "entryFile": "LaunchParkAuto.java",
+    "alliance": "blue",
+    "seed": 7,
+    "start": {
+      "x": -0.3240000009536743,
+      "y": -1.5640000104904175,
+      "headingDeg": -90
+    },
+    "end": {
+      "x": -1.4281480312347412,
+      "y": 0.9300999641418457,
+      "headingDeg": -89.94738553984024
+    },
+    "shots": [
+      {
+        "at": 0.479,
+        "count": 1
+      },
+      {
+        "at": 1.392,
+        "count": 1
+      },
+      {
+        "at": 2.304,
+        "count": 1
+      }
+    ],
+    "retained": 1,
+    "parked": true,
+    "maxOwnX": -0.3240000009536743,
+    "score": {
+      "leave": 3,
+      "autoPark": 5,
+      "autoTips": 20,
+      "teleopTips": 0,
+      "cell": 0,
+      "flower": 0,
+      "bottomNectar": 0,
+      "garden": 4,
+      "park": 0,
+      "fouls": 0,
+      "total": 32,
+      "rp": {
+        "swarm": false,
+        "pollinator1": false,
+        "pollinator2": false
+      }
+    }
+  }
+]

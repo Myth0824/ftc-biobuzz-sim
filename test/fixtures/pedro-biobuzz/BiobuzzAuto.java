@@ -24,7 +24,10 @@ public abstract class BiobuzzAuto extends OpMode {
 
     // Give up on a path that hasn't settled by now, so a bad tune can't eat the whole auto.
     public static double PATH_TIMEOUT_SECONDS = 6.0;
-    public static double MAX_DELAY_SECONDS = 20.0;
+    public static double MAX_DELAY_SECONDS = 10.0;
+    public static double POSITION_TOLERANCE_INCHES = 2.0;
+    public static double HEADING_TOLERANCE_DEGREES = 5.0;
+    private final ElapsedTime autoTimer = new ElapsedTime();
 
     protected final ElapsedTime stepTimer = new ElapsedTime();
     protected Robot robot;
@@ -78,6 +81,7 @@ public abstract class BiobuzzAuto extends OpMode {
     public void start() {
         Robot.alliance = alliance;
         follower.setPose(startPose());
+        autoTimer.reset();
         step = 0;
         delayDone = false;
         stepTimer.reset();
@@ -85,6 +89,12 @@ public abstract class BiobuzzAuto extends OpMode {
 
     @Override
     public void loop() {
+        // Leave a margin before the official30s AUTO boundary. No powered transition motion.
+        if (autoTimer.seconds() >= 29.0) {
+            robot.stop();
+            requestOpModeStop();
+            return;
+        }
         robot.update();
 
         if (!delayDone) {
@@ -118,4 +128,14 @@ public abstract class BiobuzzAuto extends OpMode {
     protected boolean pathDone() {
         return !follower.following() || stepTimer.seconds() >= PATH_TIMEOUT_SECONDS;
     }
+
+    /** Do not fire after a timeout unless odometry actually reached the launch pose. */
+    protected boolean atPose(Pose target) {
+        Pose current = follower.pose();
+        double headingError = Math.atan2(Math.sin(current.heading() - target.heading()),
+                Math.cos(current.heading() - target.heading()));
+        return Math.hypot(current.x() - target.x(), current.y() - target.y()) <= POSITION_TOLERANCE_INCHES
+                && Math.abs(Math.toDegrees(headingError)) <= HEADING_TOLERANCE_DEGREES;
+    }
+
 }

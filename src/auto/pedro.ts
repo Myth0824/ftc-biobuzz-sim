@@ -212,7 +212,7 @@ function bezier(pts: PPose[], t: number): { x: number; y: number } {
 // ---- Mechanism calls ----
 
 type Mech = 'intakeOn' | 'intakeOff' | 'shoot';
-type Event = { kind: Mech | 'boundary' } | { kind: 'path'; name: string } | { kind: 'wait'; sec: number };
+type Event = { kind: Mech | 'boundary'; count?: number } | { kind: 'path'; name: string } | { kind: 'wait'; sec: number };
 
 const INTAKE = /intake|collect|roller|sweep|brush/, SHOT = /^(shoot|launch|fire|kick|flick|feed|score|release)/, FEEDER = /feed|kick|flick|push|index|transfer|gate/;
 /** Methods that read a mechanism or the follower: a check, not an action. */
@@ -279,18 +279,30 @@ interface New { type: string; args: CstNode[] }
 
 class Source {
   readonly env: Map<string, Value>;
+  private readonly ownerNodes: CstNode[];
+  private readonly ownerCache = new Map<CstNode, CstNode[]>();
   /** The OpMode's own methods, by name, and those of them that follow no path. */
   readonly methods = new Map<string, CstNode>(); readonly helpers = new Set<string>();
   private lambdaNames = new Map<CstNode, string>();
 
   constructor(readonly text: string, readonly root: CstNode, env = new Map<string, Value>()) {
     this.env = env;
+    this.ownerNodes = [...nodes(root, 'normalClassDeclaration'), ...nodes(root, 'enumDeclaration')];
     for (const m of nodes(root, 'methodDeclaration')) {
       const name = tokens(child(child(m, 'methodHeader')!, 'methodDeclarator')!).find(t => t.tokenType.name === 'Identifier')?.image, body = child(m, 'methodBody');
       if (!name || !body) continue;
       this.methods.set(name, body);
       if (!this.follows(body)) this.helpers.add(name);
     }
+  }
+
+  enclosingOwners(n: CstNode): CstNode[] {
+    let owners = this.ownerCache.get(n);
+    if (!owners) {
+      owners = this.ownerNodes.filter(c => at(c) <= at(n) && endOf(n) <= endOf(c)).sort((a, b) => at(a) - at(b));
+      this.ownerCache.set(n, owners);
+    }
+    return owners;
   }
 
   slice(n: CstEl) { return this.text.slice(at(n), endOf(n) + 1); }
@@ -385,7 +397,11 @@ class Source {
       if (inner.some(e => e.kind !== 'boundary')) { out.push(...inner); return; }
     }
     const k = mechanism(c.recv, c.method, this.value(c.args[0]));
-    if (k) { out.push({ kind: k }); return; }
+    if (k) {
+      const count = this.value(c.args[0]);
+      out.push({ kind: k, ...(k === 'shoot' ? { count: typeof count === 'number' && Number.isInteger(count) && count >= 1 && /^(shoot|fire|launch)$/i.test(c.method) ? count : 1 } : {}) });
+      return;
+    }
     for (const a of c.args) this.scan(a, depth, out);
   }
 
@@ -420,19 +436,25 @@ class Source {
 }
 
 /** Reads every assignment and declaration of a number, a pose, or a path into `src.env`, in two passes, so that a declaration can use a field that the file declares further down. */
+const declarationCache = new WeakMap<Source, { assigns: [string, CstNode][]; changes: CstNode[] }>();
 function declarations(src: Source, warnings: string[], qualified = false) {
-  const assigns: [string, CstNode][] = [];
-  for (const d of nodes(src.root, 'variableDeclarator')) {
-    const name = tokens(child(d, 'variableDeclaratorId')!)[0]?.image, init = child(d, 'variableInitializer'), e = init && child(init, 'expression');
-    if (name && e) assigns.push([name, e]);
+  let cached = declarationCache.get(src);
+  if (!cached) {
+    const assigns: [string, CstNode][] = [];
+    for (const d of nodes(src.root, 'variableDeclarator')) {
+      const name = tokens(child(d, 'variableDeclaratorId')!)[0]?.image, init = child(d, 'variableInitializer'), e = init && child(init, 'expression');
+      if (name && e) assigns.push([name, e]);
+    }
+    for (const b of nodes(src.root, 'binaryExpression')) {
+      const op = (b.children.AssignmentOperator as IToken[] | undefined)?.[0], lhs = child(b, 'unaryExpression'), rhs = child(b, 'expression');
+      if (op?.image === '=' && lhs && rhs) assigns.push([src.slice(lhs).trim().split('.').pop()!, rhs]);
+    }
+    assigns.sort((a, b) => at(a[1]) - at(b[1]));
+    // A statement that changes a path built before, such as `park.setLinearHeadingInterpolation(a, b)` or a callback.
+    const changes = nodes(src.root, 'expressionStatement').filter(s => /^\s*[A-Za-z_$][\w$]*\s*\.\s*(set\w*HeadingInterpolation|setReversed|add\w*Callback)\s*\(/.test(src.slice(s)));
+    cached = { assigns, changes }; declarationCache.set(src, cached);
   }
-  for (const b of nodes(src.root, 'binaryExpression')) {
-    const op = (b.children.AssignmentOperator as IToken[] | undefined)?.[0], lhs = child(b, 'unaryExpression'), rhs = child(b, 'expression');
-    if (op?.image === '=' && lhs && rhs) assigns.push([src.slice(lhs).trim().split('.').pop()!, rhs]);
-  }
-  assigns.sort((a, b) => at(a[1]) - at(b[1]));
-  // A statement that changes a path built before, such as `park.setLinearHeadingInterpolation(a, b)` or a callback.
-  const changes = nodes(src.root, 'expressionStatement').filter(s => /^\s*[A-Za-z_$][\w$]*\s*\.\s*(set\w*HeadingInterpolation|setReversed|add\w*Callback)\s*\(/.test(src.slice(s)));
+  const { assigns, changes } = cached;
   for (let pass = 0; pass < 2; pass++) {
     for (const [name, e] of assigns) {
       try {
@@ -463,17 +485,14 @@ export interface PedroProjectOptions { entryFile?: string; alliance?: 'RED' | 'B
 interface ParsedFile { file: PedroJavaFile; src: Source; opName?: string }
 
 function ownerName(src: Source, n: CstNode): string | undefined {
-  const owners = [...nodes(src.root, 'normalClassDeclaration'), ...nodes(src.root, 'enumDeclaration')]
-    .filter(c => at(c) <= at(n) && endOf(n) <= endOf(c)).sort((a, b) => at(b) - at(a));
-  const owner = owners[0], id = owner && child(owner, 'typeIdentifier');
+  const owners = src.enclosingOwners(n), owner = owners[owners.length - 1], id = owner && child(owner, 'typeIdentifier');
   return id && tokens(id)[0]?.image;
 }
 
 /** Restore unqualified fields from the helper's enclosing classes rather than another file's last declaration. */
 function lexicalEnv(src: Source, n: CstNode): Map<string, Value> {
   const local = new Map(src.env);
-  const owners = [...nodes(src.root, 'normalClassDeclaration'), ...nodes(src.root, 'enumDeclaration')]
-    .filter(c => at(c) <= at(n) && endOf(n) <= endOf(c)).sort((a, b) => at(a) - at(b));
+  const owners = src.enclosingOwners(n);
   for (const owner of owners) {
     const prefix = `${tokens(child(owner, 'typeIdentifier')!)[0].image}.`;
     for (const [key, value] of src.env) if (key.startsWith(prefix) && !key.slice(prefix.length).includes('.')) local.set(key.slice(prefix.length), value);
@@ -619,11 +638,11 @@ function buildPedro(src: Source, fileName: string, warnings: string[]): PedroImp
   const opName = auto && /\bname\s*=\s*"([^"]*)"/.exec(src.slice(auto))?.[1];
   const s0 = toField(start.x, start.y);
   const children: Record<string, unknown>[] = [{
-    id: 's1', note: 'The OpMode\'s start pose. The planner drives there from wherever the robot starts in the simulator.',
+    id: 's1', note: 'Initial robot placement before AUTO. The simulator starts here, as the physical robot does.',
     ref: 'drive.driveTo', params: { pose: 'start', timeoutSec: 5 },
   }];
   const segsOf = (name: string) => { const v = env.get(name)!; return isSeg(v) ? [v] : (v as Chain).segments; };
-  type Step = { kind: 'path'; name: string; intake: boolean } | { kind: 'shoot' } | { kind: 'wait'; sec: number; intake: boolean };
+  type Step = { kind: 'path'; name: string; intake: boolean } | { kind: 'shoot'; count: number } | { kind: 'wait'; sec: number; intake: boolean };
   const steps: Step[] = [], seen = new Set<string>();
   let intake = false, driving = false, intakeCalls = 0, shots = 0;
   for (const e of order.length ? events : paths.map(name => ({ kind: 'path' as const, name }))) {
@@ -633,14 +652,14 @@ function buildPedro(src: Source, fileName: string, warnings: string[]): PedroImp
       if (seen.has(e.name) || !paths.includes(e.name)) continue;
       seen.add(e.name); driving = true;
       steps.push({ kind: 'path', name: e.name, intake: intake || segsOf(e.name).some(g => g.intake) });
-      if (segsOf(e.name).some(g => g.shoot)) { steps.push({ kind: 'shoot' }); shots++; }
+      if (segsOf(e.name).some(g => g.shoot)) { steps.push({ kind: 'shoot', count: 1 }); shots++; }
     } else if (e.kind === 'intakeOn' || e.kind === 'intakeOff') {
       intake = e.kind === 'intakeOn'; intakeCalls++;
       // An intake started right after a follow runs while that path is driven.
       if (intake && driving && last?.kind === 'path') last.intake = true;
-    } else if (e.kind === 'shoot') { shots++; if (last?.kind !== 'shoot') steps.push({ kind: 'shoot' }); }
-    // A short wait after a launch waits for the launch, which shooter.shoot already does.
-    else if (e.kind === 'wait' && !(last?.kind === 'shoot' && e.sec <= 1.5)) {
+    } else if (e.kind === 'shoot') { shots++; steps.push({ kind: 'shoot', count: e.count ?? 1 }); }
+    // Explicit waits include feeder recovery and hive-settle time; retain them even immediately after a shot.
+    else if (e.kind === 'wait') {
       if (last?.kind === 'wait' && last.intake === intake) last.sec += e.sec; else steps.push({ kind: 'wait', sec: e.sec, intake });
     }
   }
@@ -656,7 +675,7 @@ function buildPedro(src: Source, fileName: string, warnings: string[]): PedroImp
     } else if (st.kind === 'shoot') {
       // Named as the step settings name a launch after a drive, so the editor shows it as that drive's Shoot box.
       const prev = children[children.length - 1], after = prev.ref === 'drive.followPath' || 'parallel' in prev;
-      children.push({ id: after ? `${prev.id}-shoot` : id, ref: 'shooter.shoot', params: { count: 4, timeoutSec: 4 } });
+      children.push({ id: after ? `${prev.id}-shoot` : id, ref: 'shooter.shoot', params: { count: st.count, timeoutSec: Math.max(2, st.count * 0.9 + 1) } });
     } else children.push(withIntake(id, { ref: 'wait', params: { timeoutSec: Math.round(st.sec * 100) / 100 } }, st.intake));
   }
   if (intakeCalls || shots) warnings.push(`Read ${intakeCalls} intake call${intakeCalls === 1 ? '' : 's'} and ${shots} launch${shots === 1 ? '' : 'es'} by their names. Check them in the AUTO editor.`);
@@ -666,7 +685,7 @@ function buildPedro(src: Source, fileName: string, warnings: string[]): PedroImp
     tree: {
       kind: 'bt.tree', id, name: `Pedro: ${opName || className}`, env: 'onboard',
       description: `Imported from ${fileName}: ${paths.length} path${paths.length === 1 ? '' : 's'}${intakeCalls || shots ? ', with its intake and launches' : ', driven only. Add intake and shooter steps in the AUTO editor'}.`,
-      meta: { start: 'any' },
+      meta: { start: 'any', startAtFirstPose: true },
       defs: { start: `pose(${r3(s0.x)}, ${r3(s0.y)}, ${toDeg(start.h)})` },
       root: { sequence: { children } },
     },

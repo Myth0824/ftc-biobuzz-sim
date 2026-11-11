@@ -539,7 +539,8 @@ export class AutoProgram {
     if (s.state === 'running') return this.env.out.inputs;
     this.env.out.path = []; this.env.out.step = null;
     this.env.out.note = s.state === 'error' ? `AUTO error: ${String((s.error as Error)?.message ?? s.error)}` : 'script finished';
-    return NO_INPUT;
+    // An imported/team OpMode has stopped its motors. Unset intake means "all" to the physics engine.
+    return this.def.meta.startAtFirstPose === true || this.def.id.startsWith('pedro-') ? { ...NO_INPUT, intake: 'none' } : NO_INPUT;
   }
 }
 

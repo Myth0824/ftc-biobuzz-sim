@@ -5,6 +5,8 @@
 import type RAPIER from '@dimforge/rapier3d-compat';
 import { MatchAudio } from '../audio';
 import { Coach } from '../auto/coach';
+import { AUTO_PROBLEMS, AUTO_TREES, SOLO_AUTO, autoFor } from '../auto/onboard';
+import { placeAutoStart } from '../auto/start-pose';
 import type { FieldEditor } from '../field-editor';
 import { Referee } from '../ref/referee';
 import type { View } from '../render/view';
@@ -90,12 +92,24 @@ function timeline(mode: MatchMode): { span: number; marks: SystemMark[] } {
   return { span, marks: [{ t: 0, label: 'MATCH starts' }, ...(teleopAt ? [{ t: teleopAt + past, label: 'TELEOP starts' }] : []), { t: span - flowerUnlock + past, label: 'FLOWERS open' }, { t: span - endgame + past, label: 'Endgame' }, { t: span + past, label: 'MATCH ends' }] };
 }
 
+/** Keep the pre-match robot at an edited source start too. Never reposition a running robot. */
+export function placeSelectedAutoStarts(sim = app.sim) {
+  if (sim?.phase !== 'pre') return;
+  sim.robots.forEach((_, i) => {
+    const view = sim.view(i), selected = entrant(i).auto;
+    if (selected === 'none') return;
+    const name = selected === 'default' ? autoFor(view, SOLO_AUTO) : selected;
+    if (!AUTO_PROBLEMS[name]) placeAutoStart(AUTO_TREES[name] ?? AUTO_TREES[SOLO_AUTO], view);
+  });
+}
+
 /** Builds a new FIELD for the next MATCH from the settings and the robots' setups. */
 export function reset() {
   app.editor.close();
   // A tournament MATCH is a full playoff MATCH against a full blue alliance.
   const t = app.bracket, oc = t ? 3 : Number(sel.opponents.value), mode = t ? 'full' : sel.mode.value as MatchMode, playoff = !!t || sel.stage.value === 'playoff';
   const sim = app.sim = new Sim(app.rapier, undefined, mode, app.seed++, { opponentCount: oc, playoff, configFor: (a, slot) => robotConfig(entrant((a === 'red' ? 0 : 2) + slot)) });
+  placeSelectedAutoStarts(sim);
   // Every robot has a Coach: it runs the robot's AUTO tree, and the planner in TELEOP unless a person drives the robot.
   // Coaches record their trees, for the tree view and the match trace. Recording doesn't change what a robot does.
   app.coaches = sim.robots.map((_, i) => { const c = new Coach(), b = entrant(i); c.flowerStartSec = b.flowerStartSec; c.defense = b.defense; c.autoOverride = b.auto === 'default' || b.auto === 'none' ? null : b.auto; c.traceTrees = true; return c; });
@@ -114,6 +128,7 @@ export function stopMatch() { app.livePaused = false; app.startAt = 0; app.view.
 export function startMatch() {
   if (app.sim.phase !== 'pre' || app.startAt) return;
   if (app.bots[0].driver === 'planner') { toast('Choose Controller or Keyboard in the robot config for team 32294 before starting.', 'ref'); return; }
+  placeSelectedAutoStarts();
   closeConfig(); closeModals(); app.editor.close();
   if (!app.audio.enabled) { app.sim.start(); return; }
   app.audio.play('start_countdown'); app.startAt = performance.now() + 3000;

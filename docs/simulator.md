@@ -215,8 +215,8 @@ order, and whether the shot preview enters the CELL.
 **Import Pedro Pathing auto** in a red robot's config reads a Pedro Pathing OpMode's `.java` file into a new AUTO
 tree. `src/auto/pedro.ts` parses the file with java-parser, which loads only when you import, and evaluates the file's declarations of numbers, `Pose`s, and paths, with no Java compiler. A file that isn't valid Java is refused with the line where it stops parsing. It
 reads Pedro 2.x (`line`, `curve`, `.linear`, `.constant`, `.tangent`, `.reversed`) and Pedro 1.x (`BezierLine`,
-`BezierCurve`, `Point`, `pathBuilder().addPath(...)` and the `set...HeadingInterpolation` calls). The tree drives to the
-OpMode's start pose with the path planner, and then follows each path with `drive.followPath`, in the order that the
+`BezierCurve`, `Point`, `pathBuilder().addPath(...)` and the `set...HeadingInterpolation` calls). The robot is placed at the
+OpMode's declared start pose before AUTO, including its heading, and then follows each path with `drive.followPath`, in the order that the
 source calls `follow` or `followPath`. A curve becomes six waypoints. Pedro's 144 in. FIELD maps onto FIELD meters
 about its center, and a source whose start pose is on the blue half is rotated 180° into red's frame. Dropping a
 `.java` file on the page imports it too.
@@ -242,15 +242,17 @@ The team helpers are previewed with the **RED** alliance default. The simulator 
 180° as usual; the import API also accepts `{ alliance: 'BLUE' }` and normalizes the source back to red's frame.
 Runtime gamepad choices, start delays, hardware calls, and arbitrary Java control flow are not executed. A shared
 base class's lifecycle is not simulated. A curve is still sampled into six waypoints and followed by the simulator,
-so the preview does not reproduce Pedro's tuned follower or validate the physical robot. `LaunchParkAuto` currently
-contains no firing call, so its import contains only driving. The importer handles a limited declaration subset,
+so the preview does not reproduce Pedro's tuned follower or validate the physical robot. The team Launch Park routine has three separate rear shots at 0.9 s intervals, then hive settling and PARK.
+The fourth preload is retained; it is not sent at the lowered CELL after a successful TIP. The importer handles a limited declaration subset,
 not general Java object construction or multiple independently configured instances of one path class.
 
 It also reads the mechanism calls, by their names, in source order. A call on an intake, roller, or collector
 (`intake.setPower(1)`, `robot.startIntake()`) turns the intake on, and `stop`, `off`, `reverse`, or a power of 0 or less
 turns it off: the paths and waits while it runs go in a `parallel` with `intake.run`. An intake started right after a
 `follow` runs during that path. A launch (`shoot`, `fire`, `launch`, `kick`, `feed`, or a feeder or kicker set to run)
-becomes `shooter.shoot`, which empties the transfer. A flywheel's `setVelocity` isn't a launch. `sleep(ms)`, FTCLib's
+becomes a one-element `shooter.shoot` by default. `shoot(n)`, `fire(n)`, or `launch(n)` preserves an
+explicit integer count. Consecutive calls and explicit sleeps/recovery timers remain separate; they are not
+collapsed into a four-element launch. A flywheel's `setVelocity` isn't a launch. `sleep(ms)`, FTCLib's
 `WaitCommand(ms)`, NextFTC's `Delay(s)`, and a timer compared alone in a condition
 (`pathTimer.getElapsedTimeSeconds() > 1.5`) become `wait`; a timer beside `isBusy()` is a timeout and is skipped. The
 OpMode's own helper methods, path callbacks (`addParametricCallback`), and command lambdas are read too.
@@ -358,3 +360,30 @@ the setting.
 alliance: goals abandoned before they were achieved, course reversals, seconds against the partner, idle seconds,
 meters per element, and balls left under the HIVE. `npx tsx scripts/auto-check.ts 8` reports AUTO points, TIPS,
 and hopper fill.
+
+### Team 32294 source route
+
+The main robot now defaults to the team's fixed rear FIFO shooter and front-only intake, with 0.9 s between
+loaded balls. It has no automatic turret, dual shooter, or four-ball catapult. Other robots retain their
+benchmark presets. Saved main-robot catapult/dual-shooter settings are corrected without discarding custom
+AUTO selections or independently edited dimensions. The18 in. chassis,435 rpm drive and reference mass are
+assumptions until the real dimensions/drive are measured.
+
+The built-in32294 plan is generated from the robot Java snapshots: `npx tsx scripts/team-auto.ts --write-plan`.
+Use `npx tsx scripts/team-auto.ts --output experiments/team-auto-2026-11-10.json` to repeat the isolated route
+runs. Both routes start against a legal perimeter wall, remain on their own half, and PARK in the loading tape.
+The rear launch heading for red is-90 degrees, with its front against the audience wall; blue is rotated 180 degrees.
+The launch stand uses nominal Pedro y 20 in., matching the simulator's reference rear-shooter ballistics.
+The nominal 144 in. Pedro frame includes the CAD physical-wall inset; source and simulation wall positions agree.
+
+[Official staging/scoring](https://ftc-resources.firstinspires.org/ftc/archive/2027/game/manual-10) starts each raised
+CELL with three NECTAR. The source therefore launches three individual POLLEN, then lets the hive settle,
+rather than sending all four after it tips. [G304/G402/G403](https://ftc-resources.firstinspires.org/ftc/archive/2027/game/manual-11)
+cover wall starts, own-half AUTO priority and no powered transition motion. The simulator now gates intake
+and turret actuation as well as shooting/placement by the match phase. Imported/team programs leave their
+intake stopped after finishing. These targeted corrections do not make this a full official referee system.
+
+The real transfer-motor feed pulse is0.25 s as an initial estimate and must be tuned to feed one ball. The team
+supplied0.9 s cycle time. A separate flywheel, if fitted, is not configured by the existing motor mapping. The
+Java auto refuses to fire after a failed launch approach and stops its outputs by 29 s. No physical robot test
+has been performed by this workflow.
